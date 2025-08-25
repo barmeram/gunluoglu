@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "930829754955",
+    "project_id": "gunluoglugiris",
+    "storage_bucket": "gunluoglugiris.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:930829754955:android:89ac03d5069207cab023ce",
+        "android_client_info": {
+          "package_name": "com.example.gunluogluproje"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCM_ZRi3GtmTypy5BzOcSejERdKjR6LYX4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
