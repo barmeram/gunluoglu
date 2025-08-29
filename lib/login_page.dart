@@ -1,10 +1,12 @@
 // login_page.dart (LoginPage)
 // ✅ Girişten hemen sonra users/{uid} dokümanı okunur.
 // ✅ isActive == false ise kullanıcı derhal signOut edilir ve engel mesajı gösterilir.
+// ✅ "Beni hatırla" ile uygulama açılışında otomatik rol sayfasına yönlendirme yapılır.
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'stock_from_customer_orders_page.dart'; // günlük stok ekranı (tüm siparişler)
 import 'pos_page.dart';
@@ -23,6 +25,57 @@ class _LoginPageState extends State<LoginPage> {
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final auth = FirebaseAuth.instance;
+
+  // UI state
+  bool rememberMe = false;     // ✅ Beni hatırla seçimi
+  bool _checkingAuto = true;   // Uygulama açılışında otomatik kontrol (splash/loader)
+  bool _navigated = false;     // Aynı anda birden fazla pushReplacement'ı engelle
+
+  @override
+  void initState() {
+    super.initState();
+    _tryAutoLogin(); // Uygulama açılınca otomatik kontrol et
+  }
+
+  /// Açılışta "beni hatırla" ve mevcut oturumu kontrol et.
+  Future<void> _tryAutoLogin() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedRemember = prefs.getBool('rememberMe') ?? false;
+
+      // Kullanıcı daha önce "beni hatırla" dediyse ve hala oturum varsa
+      final user = auth.currentUser;
+      if (savedRemember && user != null) {
+        final uid = user.uid;
+
+        final snap = await FirebaseFirestore.instance
+            .collection("users")
+            .doc(uid)
+            .get();
+        final data = snap.data() ?? {};
+
+        final bool isActive = (data["isActive"] as bool?) ?? true;
+        if (!isActive) {
+          await auth.signOut();
+          await prefs.remove('rememberMe');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Hesabın engellenmiş. Lütfen yöneticiyle iletişime geç.")),
+            );
+          }
+        } else {
+          final String role = (data["role"] as String?) ?? "user";
+          // Kaydı güncel tutmak adına rolü de saklayalım (opsiyonel)
+          await prefs.setString('lastRole', role);
+          if (mounted) _navigateByRole(uid, role);
+        }
+      }
+    } catch (_) {
+      // Sessiz geç; login ekranı gösterilecek
+    } finally {
+      if (mounted) setState(() => _checkingAuto = false);
+    }
+  }
 
   Future<void> login() async {
     try {
@@ -49,53 +102,19 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      final String role = (data["role"] as String?) ?? "user";
-      // admin / producer / order / baker / user
+      final String role = (data["role"] as String?) ?? "user"; // admin / producer / order / baker / user
 
-      if (role == "admin") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => UsersPage(currentUid: uid, currentRole: role)),
-        );
-        return;
+      // ✅ Beni hatırla seçiliyse kaydet
+      final prefs = await SharedPreferences.getInstance();
+      if (rememberMe) {
+        await prefs.setBool('rememberMe', true);
+        await prefs.setString('lastRole', role);
+      } else {
+        await prefs.remove('rememberMe');
+        await prefs.remove('lastRole');
       }
 
-      if (role == "producer") {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => BakerTavaPage(userId: uid)),
-        );
-        return;
-      }
-
-      if (role == "order") {
-        // 🆕 Sipariş rolü → CustomerOrderPage
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => CustomerOrderPage(userId: uid)),
-        );
-        return;
-      }
-
-      if (role == "baker") {
-        // Fırıncı: Günlük stok sayfasına (tüm siparişleri görsün)
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => StockFromCustomerOrdersPage(
-              userId: uid,      // sayfa imzası gereği
-              showAll: true,    // baker tüm kullanıcıları görsün
-            ),
-          ),
-        );
-        return;
-      }
-
-      // default: user (tezgah / akşamcı) → POS
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => PosSalesPage(userId: uid)),
-      );
+      if (mounted) _navigateByRole(uid, role);
     } on FirebaseAuthException catch (e) {
       String msg;
       if (e.code == 'user-not-found') {
@@ -117,6 +136,71 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  void _navigateByRole(String uid, String role) {
+    if (_navigated || !mounted) return;
+    _navigated = true;
+
+    if (role == "admin") {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => UsersPage(currentUid: uid, currentRole: role)),
+      );
+      return;
+    }
+
+    if (role == "producer") {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => BakerTavaPage(userId: uid)),
+      );
+      return;
+    }
+
+    if (role == "order") {
+      // 🆕 Sipariş rolü → CustomerOrderPage
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => CustomerOrderPage(userId: uid)),
+      );
+      return;
+    }
+
+    if (role == "baker") {
+      // Fırıncı: Günlük stok sayfasına (tüm siparişleri görsün)
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => StockFromCustomerOrdersPage(
+            userId: uid,      // sayfa imzası gereği
+            showAll: true,    // baker tüm kullanıcıları görsün
+          ),
+        ),
+      );
+      return;
+    }
+
+    // default: user (tezgah / akşamcı) → POS
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => PosSalesPage(userId: uid)),
+    );
+  }
+
+  // Opsiyonel: uygulama içinde bir yerde çağırmak istersen kullan.
+  Future<void> appLogout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('rememberMe');
+    await prefs.remove('lastRole');
+    await auth.signOut();
+    if (!mounted) return;
+    // LoginPage'e dönmek için:
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+    );
+  }
+
   @override
   void dispose() {
     emailController.dispose();
@@ -126,6 +210,14 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Açılışta otomatik kontrol sırasında basit bir loader göstermek UI'i temiz tutar
+    if (_checkingAuto) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Center(
@@ -185,7 +277,21 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+
+              // ✅ Beni Hatırla
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Checkbox(
+                    value: rememberMe,
+                    activeColor: Colors.amber[700],
+                    onChanged: (v) => setState(() => rememberMe = v ?? false),
+                  ),
+                  const Text("Beni hatırla", style: TextStyle(color: Colors.white)),
+                ],
+              ),
+              const SizedBox(height: 8),
 
               ElevatedButton(
                 onPressed: login,

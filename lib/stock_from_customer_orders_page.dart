@@ -3,7 +3,8 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-// 🔹 Stok azaltma helper'ını kullanmak için eklendi
+
+// 🔹 Stok azaltma helper (üretim stoklarından düşmek için)
 import 'package:gunluogluproje/baker_stock_page.dart';
 import 'package:gunluogluproje/production_recycle_page.dart';
 
@@ -14,7 +15,8 @@ class StockFromCustomerOrdersPage extends StatefulWidget {
     this.showAll = false,
   });
 
-  final String userId; // showAll=false iken kendi siparişleri için kullanılır
+  /// showAll=false iken: sadece bu kullanıcının siparişlerini göster
+  final String userId;
   final bool showAll;
 
   @override
@@ -27,14 +29,17 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
   DateTime _selectedDay = DateTime.now();
   String? _selectedUserId; // showAll=true iken seçili kullanıcı (null = hepsi)
 
-  /// Solda görünen HEDEF teslim sayısı: productId -> count
-  /// Varsayılan: o günün SİPARİŞ adedi
+  /// UI üzerinde geçici “hedef toplam teslim” override değerleri (pid -> desiredTotal)
+  /// Varsayılan: o günün sipariş adedi (ordQ). Ekranda görünen "kalan" = desiredTotal - delivered.
   final Map<String, int> _target = {};
 
-  /// Son “Stoğu Onayla”da gerçekten yazılan **pozitif** delta (ödemede kullanılır)
+  /// Son Stoğu Onayla'da yazılan **pozitif** delta (ödemede kullanılabilir)
   Map<String, int>? _lastDeltaPos;
 
   bool _applying = false;
+
+  // 🔸 1 tava = 12 adet
+  static const int _unitsPerTray = 12;
 
   DateTime get _dayStart => DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
   DateTime get _dayEnd => _dayStart.add(const Duration(days: 1));
@@ -148,7 +153,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
     }
   }
 
-  /// Ürün bazında bugüne kadar YAZILMIŞ teslim toplamı: pid -> qty
+  /// Ürün bazında bugüne kadar YAZILMIŞ teslim toplamı: pid -> qty (negatifler dahil)
   Stream<Map<String, int>> deliveryQtyStream() async* {
     await for (final snap in _deliveriesQ().snapshots()) {
       final m = <String, int>{};
@@ -156,7 +161,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
         final data = d.data();
         final pid = (data['productId'] as String?) ?? '';
         if (pid.isEmpty) continue;
-        final q = ((data['qty'] as num?) ?? 0).toInt(); // negatif düzeltme olabilir
+        final q = ((data['qty'] as num?) ?? 0).toInt();
         m[pid] = (m[pid] ?? 0) + q;
       }
       yield m;
@@ -178,7 +183,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
     }
   }
 
-  /// Günlük tahsilat (nakit/veresiye/total) — ödemelerden
+  /// Günlük tahsilat (nakit/veresiye/total)
   Stream<Map<String, num>> paymentAggStream() async* {
     await for (final snap in _paymentsQ().snapshots()) {
       num cash = 0, credit = 0, total = 0;
@@ -242,7 +247,6 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
   // ---------------------------
 
   /// Sipariş/ürün adını production.productName ile eşleştir.
-  /// Gerekirse genişlet: soldaki POS/sipariş adı -> sağdaki production adı
   String _mapToProductionName(String orderName) {
     const aliases = <String, String>{
       // POS/Order -> Production
@@ -259,7 +263,6 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
       'Sandviç': 'Sandviç',
       'Acılı': 'Salçalı Poğaça',
       'K.Simit': 'Küçük Poğaça',
-      // zaten aynı olanlar için yazmaya gerek yok
     };
     return aliases[orderName] ?? orderName;
   }
@@ -268,7 +271,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
   // Apply
   // ---------------------------
 
-  /// Stoğu Onayla: HEDEF − MevcutTeslim delta’sını (negatif/pozitif) yazar.
+  /// Stoğu Onayla: hedefToplam − mevcutTeslim (delta) kadar (negatif/pozitif) teslim yazar.
   /// Pozitif delta `_lastDeltaPos`’a kaydedilir (ödemede kullanılır).
   Future<void> _applyDeliveriesOnly() async {
     if (_applying) return;
@@ -298,12 +301,17 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
 
       for (final pid in pids) {
         final ordQ = orderQty[pid] ?? 0;
-        final targetCount = _target[pid] ?? ordQ;
+
+        // 🔸 hedef toplam teslim: override varsa onu, yoksa sipariş adedi
+        final desiredTotal = _target[pid] ?? ordQ;
         final cur = delivered[pid] ?? 0;
-        final delta = targetCount - cur;
+
+        // 🔸 yazılacak delta: hedef - mevcutTeslim (negatif olabilir, düzeltme kaydı)
+        final delta = desiredTotal - cur;
         if (delta == 0) continue;
 
-        final safeDelta = max(-cur, delta); // final < 0 olmasın
+        // final teslim < 0 olmasın
+        final safeDelta = max(-cur, delta);
         if (safeDelta == 0) continue;
 
         final unit = ordQ > 0 ? (orderAmt[pid] ?? 0) / ordQ : 0;
@@ -327,9 +335,6 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
 
         amountAbs += line.abs();
         countAbs += safeDelta.abs();
-
-        // Ekranı güncel teslimle eşitle
-        _target[pid] = max(0, cur + safeDelta);
       }
 
       if (i == 0) {
@@ -338,11 +343,11 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
         await batch.commit();
         setState(() {
           _lastDeltaPos = appliedPositives.isEmpty ? null : appliedPositives;
+          // _target’ı değiştirmiyoruz → stream’ler teslimi getirip “kalan”ı otomatik güncelleyecek
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Stok güncellendi • Değişen adet: $countAbs • ~${_cur(amountAbs)}')),
         );
-        // Aynı sayfada kalıyoruz.
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
@@ -351,9 +356,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
     }
   }
 
-  /// Ödemeyi Onayla: Son stoğu onayladığın **pozitif delta** kadar (yoksa
-  /// mevcut pozitif fark kadar) tahsilat kaydı. “Veresiye”yi girince nakit
-  /// otomatik `toplam - veresiye` olur (ve tersi).
+  /// Ödemeyi Onayla: Son stoğu onayladığın **pozitif delta** kadar (yoksa mevcut pozitif fark kadar) tahsilat kaydı.
   Future<void> _applyPaymentOnly() async {
     if (_applying) return;
 
@@ -369,16 +372,18 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
       final orderQty = (maps['orderQty'] as Map<String, int>);
       final orderAmt = (maps['orderAmt'] as Map<String, num>);
       final delivered = (maps['delivered'] as Map<String, int>);
-      final names = (maps['names'] as Map<String, String>); // 🔹 ürün adları
+      final names = (maps['names'] as Map<String, String>);
 
       Map<String, int> payMap = _lastDeltaPos ?? <String, int>{};
+
+      // Eğer son onayda pozitif delta yoksa, mevcut pozitif fark kadar ödeme hazırla
       if (payMap.isEmpty) {
         for (final pid in orderQty.keys) {
           final ordQ = orderQty[pid] ?? 0;
-          final targetCount = _target[pid] ?? ordQ;
+          final desiredTotal = _target[pid] ?? ordQ;
           final cur = delivered[pid] ?? 0;
-          final delta = targetCount - cur;
-          final add = max(0, delta);
+          final delta = desiredTotal - cur;
+          final add = max(0, delta); // sadece pozitifler ödenir
           if (add > 0) payMap[pid] = add;
         }
       }
@@ -410,7 +415,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       final payId = "${targetUid}_${_dayKey}_$nowMs";
 
-      // 1) Önce ödeme kaydı (izin hatasında stok düşmeyelim)
+      // 1) Ödeme kaydı
       try {
         await db.collection('customer_payment_summaries').doc(payId).set({
           'userId': targetUid,
@@ -427,8 +432,8 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'İzin reddedildi. Firestore kurallarında customer_payment_summaries için "create" iznini ver.'
-                    '\n(Örn: request.auth != null ve createdBy == request.auth.uid)',
+                'İzin reddedildi. Firestore kurallarında customer_payment_summaries için "create" iznini ver.\n'
+                    '(Örn: request.auth != null ve createdBy == request.auth.uid)',
                 maxLines: 4,
               ),
             ),
@@ -440,7 +445,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
         }
       }
 
-      // 2) Ödeme başarılı -> ÜRETİM stoklarını düş (sadece pozitif adetler)
+      // 2) Ödeme başarılı → ÜRETİM stoklarını düş (sadece pozitif adetler)
       final decFutures = <Future>[];
       payMap.forEach((pid, addQty) {
         if (addQty > 0) {
@@ -461,7 +466,6 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
       setState(() {
         _lastDeltaPos = null; // ödendi
       });
-      // Aynı sayfada kalıyoruz.
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
     } finally {
@@ -494,18 +498,14 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
             icon: const Icon(Icons.calendar_month, color: gold),
             tooltip: 'Tarih Seç',
           ),
-          // 🔹 YENİ: Geri Dönüşüm sayfasına git (ProductionRecyclePage)
           IconButton(
             tooltip: 'Geri Dönüşüm (G)',
             icon: const Icon(Icons.recycling, color: gold),
             onPressed: () {
-              // showAll + Tümü ise seçili yoksa kendi userId'yi gönderiyoruz.
               final navUserId = widget.showAll ? (_selectedUserId ?? widget.userId) : widget.userId;
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => ProductionRecyclePage(
-                    userId: navUserId,
-                  ),
+                  builder: (_) => ProductionRecyclePage(userId: navUserId),
                 ),
               );
             },
@@ -588,8 +588,10 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
                               backgroundColor: Colors.black,
                               foregroundColor: gold,
                               radius: 10,
-                              child: Text(orders.toString(),
-                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              child: Text(
+                                orders.toString(),
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
                             ),
                             side: const BorderSide(color: Color(0x33FFD700)),
                           ),
@@ -601,7 +603,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
               },
             ),
 
-          // ORTA: Ürün listesi — HEDEF (varsayılan sipariş adedi)
+          // ORTA: Ürün listesi — "Kalan üretim/teslim" odaklı, AMA rozet hedefToplamı gösterir (0'a düşmez)
           Expanded(
             child: StreamBuilder<Map<String, Map<String, num>>>(
               stream: orderAggStream(),
@@ -615,7 +617,6 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
                   builder: (_, delSnap) {
                     final delivered = delSnap.data ?? <String, int>{};
 
-                    // SADECE SİPARİŞ EDİLEN ÜRÜNLER — 0’lar listelenmez
                     final pids = orderAgg.keys.toList()..sort();
                     if (pids.isEmpty) {
                       return const Center(child: Text('Sipariş yok', style: TextStyle(color: gold)));
@@ -631,24 +632,29 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
                         final pid = pids[i];
                         final ord = orderAgg[pid] ?? {'qty': 0, 'amount': 0};
                         final ordQ = (ord['qty'] ?? 0).toInt();
-                        final ordA = (ord['amount'] ?? 0);
-                        // unit hesaplanıyor; gerekirse kullanılır
-                        // final unit = ordQ > 0 ? (ordA / ordQ) : 0;
 
                         final curDelivered = (delivered[pid] ?? 0);
 
-                        // Ekrandaki HEDEF: set edilmişse o; yoksa SİPARİŞ adedi
-                        final targetCount = _target[pid] ?? ordQ;
+                        // 🔸 hedef toplam teslim: override varsa onu kullan; yoksa sipariş adedi
+                        final desiredTotal = _target[pid] ?? ordQ;
+
+                        // 🔸 kalan teslim/üretim (ekranda gösterilecek yardımcı değer)
+                        final remaining = max(0, desiredTotal - curDelivered);
+
+                        // 🔸 tava/adet hesabı kalan'a göre (1 tava = 12)
+                        final trays = remaining ~/ _unitsPerTray;
+                        final remainder = remaining % _unitsPerTray;
 
                         return ListTile(
                           dense: true,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                          // 🔴 ÖNEMLİ: Rozet artık desiredTotal gösterir → 0'a düşmez
                           leading: CircleAvatar(
                             backgroundColor: Colors.black,
                             foregroundColor: gold,
                             radius: 14,
                             child: Text(
-                              targetCount.toString(),
+                              desiredTotal.toString(),
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                             ),
                           ),
@@ -658,9 +664,19 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(color: gold, fontWeight: FontWeight.w600, fontSize: 14),
                           ),
-                          subtitle: Text(
-                            'Sipariş: $ordQ  •  Mevcut Teslim: $curDelivered',
-                            style: const TextStyle(color: Colors.white60, fontSize: 11),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Sipariş: $ordQ  •  Teslim: $curDelivered  •  Kalan: $remaining',
+                                style: const TextStyle(color: Colors.white60, fontSize: 11),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Üretim • $trays tava + $remainder adet  (Kalan: $remaining)',
+                                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                              ),
+                            ],
                           ),
                           trailing: !canSelect
                               ? null
@@ -668,15 +684,15 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                tooltip: 'Azalt',
-                                onPressed: targetCount > 0
-                                    ? () => setState(() => _target[pid] = max(0, targetCount - 1))
+                                tooltip: 'Hedef Toplamı Azalt',
+                                onPressed: desiredTotal > 0
+                                    ? () => setState(() => _target[pid] = max(0, desiredTotal - 1))
                                     : null,
                                 icon: const Icon(Icons.remove_circle_outline, color: gold),
                               ),
                               IconButton(
-                                tooltip: 'Arttır',
-                                onPressed: () => setState(() => _target[pid] = targetCount + 1),
+                                tooltip: 'Hedef Toplamı Arttır',
+                                onPressed: () => setState(() => _target[pid] = desiredTotal + 1),
                                 icon: const Icon(Icons.add_circle_outline, color: gold),
                               ),
                             ],
@@ -690,7 +706,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
             ),
           ),
 
-          // ALT: Günlük Hasılat (TESLİM bazlı) + Tahsilat bilgisi + Aksiyonlar
+          // ALT: Günlük Hasılat + Tahsilat + Aksiyonlar
           Container(
             decoration: const BoxDecoration(
               color: Colors.black,
@@ -924,7 +940,7 @@ class _PaymentSplitSheetState extends State<_PaymentSplitSheet> {
                         .showSnackBar(const SnackBar(content: Text('Tutarlar negatif olamaz')));
                     return;
                   }
-                  // Otomatik senkron zaten toplamı tutuyor; yine de tolerans kontrolü:
+                  // Otomatik senkron zaten toplamı tutuyor; yine de tolerans:
                   if ((sum - widget.total).abs() > 0.01) {
                     ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('Nakit + Veresiye toplamı ile seçilen toplam eşleşmiyor')));

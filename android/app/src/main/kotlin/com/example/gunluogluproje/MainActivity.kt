@@ -1,4 +1,4 @@
-package com.example.gunluogluproje
+package com.omerb.gunluogluproje
 
 import io.flutter.embedding.android.FlutterActivity
 

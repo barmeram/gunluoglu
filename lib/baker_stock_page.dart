@@ -1,23 +1,65 @@
+// ==============================
+// FILE: baker_stock_page.dart
+// ==============================
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class BakerStockPage extends StatelessWidget {
-  const BakerStockPage({super.key, required this.userId});
+  const BakerStockPage({
+    super.key,
+    required this.userId,
+    this.initialItems, // AdminDailyPicker'dan gelen aggregate özet (opsiyonel)
+    this.dayLabel, // Hangi gün gösterilecek? (opsiyonel, yoksa bugün)
+  });
 
   final String userId;
+  final List<Map<String, dynamic>>? initialItems;
+  final String? dayLabel;
 
-  // --- Stok Sıfırlama: onay + güvenli toplu silme (450'lik batch) ---
-  Future<void> _resetStocks(BuildContext context) async {
+  // Gün anahtarı
+  String _todayKey() {
+    final now = DateTime.now();
+    return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+  }
+
+  String _day() => dayLabel ?? _todayKey();
+
+  String _slugify(String s) {
+    const trMap = {
+      'İ': 'I',
+      'I': 'I',
+      'Ş': 'S',
+      'Ğ': 'G',
+      'Ü': 'U',
+      'Ö': 'O',
+      'Ç': 'C',
+      'ı': 'i',
+      'ş': 's',
+      'ğ': 'g',
+      'ü': 'u',
+      'ö': 'o',
+      'ç': 'c',
+    };
+    final replaced = s.trim().split('').map((c) => trMap[c] ?? c).join();
+    final lower = replaced.toLowerCase();
+    final keep = RegExp(r'[a-z0-9]+');
+    final parts = keep.allMatches(lower).map((m) => m.group(0)!).toList();
+    final slug = parts.join('_');
+    return slug.isEmpty ? 'urun_${DateTime.now().millisecondsSinceEpoch}' : slug;
+  }
+
+  // --- Stok Sıfırlama: sadece seçili gün ---
+  Future<void> _resetDayStocks(BuildContext context) async {
     final db = FirebaseFirestore.instance;
+    final day = _day();
 
-    // 1) Kullanıcıdan onay al
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Stokları Sıfırla'),
-        content: const Text(
-          'Production koleksiyonundaki TÜM stok kayıtları silinecek. Emin misin?',
+        content: Text(
+          "'$day' gününe ait production kayıtlarının TÜMÜ silinecek. Emin misin?",
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('İptal')),
@@ -28,10 +70,10 @@ class BakerStockPage extends StatelessWidget {
 
     if (confirm != true) return;
 
-    // 2) Tüm dokümanları parça parça (<=500 limitine takılmadan) sil
     try {
       const chunk = 450;
-      Query<Map<String, dynamic>> q = db.collection('production').limit(chunk);
+      Query<Map<String, dynamic>> q =
+      db.collection('production').where('date', isEqualTo: day).limit(chunk);
       while (true) {
         final snap = await q.get();
         if (snap.docs.isEmpty) break;
@@ -41,12 +83,11 @@ class BakerStockPage extends StatelessWidget {
           batch.delete(d.reference);
         }
         await batch.commit();
-        // Döngü tekrar limit(chunk) çekerek devam eder; tümü silinene kadar
       }
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Stoklar sıfırlandı ✅')),
+          SnackBar(content: Text("Stoklar sıfırlandı ✅ ($day)")),
         );
       }
     } catch (e) {
@@ -62,144 +103,257 @@ class BakerStockPage extends StatelessWidget {
   Widget build(BuildContext context) {
     const gold = Color(0xFFFFD700);
     final db = FirebaseFirestore.instance;
+    final day = _day();
+    final s = _scaleFor(context);
 
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: gold),
-        title: const Text(
-          'Stok',
-          style: TextStyle(color: gold, fontWeight: FontWeight.bold),
+        title: Text(
+          'Stok • $day',
+          style: TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 16 * s),
         ),
         actions: [
           IconButton(
-            tooltip: 'Stokları sıfırla',
+            tooltip: 'Seçili günü sıfırla',
             icon: const Icon(Icons.delete_forever, color: gold),
-            onPressed: () => _resetStocks(context),
+            onPressed: () => _resetDayStocks(context),
           ),
         ],
       ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: db.collection('production').orderBy('productName').snapshots(),
-        builder: (ctx, snap) {
-          if (snap.hasError) {
-            return const Center(
-              child: Text('Hata oluştu', style: TextStyle(color: Colors.red, fontSize: 16)),
-            );
-          }
-          if (!snap.hasData) {
-            return const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFFD700)),
-            );
-          }
+      body: Column(
+        children: [
+          // AdminDailyPicker'dan gelen özet varsa göster
+          if (initialItems != null && initialItems!.isNotEmpty)
+            _AdminSummaryBanner(initialItems: initialItems!),
 
-          final docs = snap.data!.docs;
+          // Canlı stok (seçili gün)
+          Expanded(
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: db
+                  .collection('production')
+                  .where('date', isEqualTo: day)
+                  .orderBy('productName')
+                  .snapshots(),
+              builder: (ctx, snap) {
+                if (snap.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(12 * s),
+                      child: Text(
+                        'Hata oluştu: ${snap.error}',
+                        style: TextStyle(color: Colors.red, fontSize: 14 * s),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  );
+                }
+                if (!snap.hasData) {
+                  return const Center(
+                    child: CircularProgressIndicator(color: Color(0xFFFFD700)),
+                  );
+                }
 
-          // Toplam hesapla
-          int totalTrays = 0;
-          int totalUnits = 0;
-          for (final d in docs) {
-            final m = d.data();
-            totalTrays += (m['trays'] as num? ?? 0).toInt();
-            totalUnits += (m['units'] as num? ?? 0).toInt();
-          }
+                final docs = snap.data!.docs;
 
-          if (docs.isEmpty) {
-            return const Center(
-              child: Text('Kayıt yok', style: TextStyle(color: Color(0xFFFFD700), fontSize: 16)),
-            );
-          }
+                // Toplam hesapla
+                int totalTrays = 0;
+                int totalUnits = 0;
+                for (final d in docs) {
+                  final m = d.data();
+                  totalTrays += (m['trays'] as num? ?? 0).toInt();
+                  totalUnits += (m['units'] as num? ?? 0).toInt();
+                }
 
-          return Column(
-            children: [
-              // toplam özet bar
-              Container(
-                width: double.infinity,
-                margin: const EdgeInsets.all(12),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey[900],
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: gold),
-                ),
-                child: Row(
+                if (docs.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(16 * s),
+                      child: Text(
+                        'Kayıt yok',
+                        style: TextStyle(color: gold, fontSize: 16 * s),
+                      ),
+                    ),
+                  );
+                }
+
+                return Column(
                   children: [
-                    Expanded(
-                      child: Text(
-                        'Toplam Tava: $totalTrays',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        'Toplam Adet: $totalUnits',
-                        textAlign: TextAlign.end,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // ürün listesi
-              Expanded(
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
-                  itemCount: docs.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (_, i) {
-                    final m = docs[i].data();
-                    final name = (m['productName'] ?? '-') as String;
-                    final trays = (m['trays'] as num? ?? 0).toInt();
-                    final units = (m['units'] as num? ?? 0).toInt();
-
-                    return Container(
-                      padding: const EdgeInsets.all(12),
+                    // toplam özet bar
+                    Container(
+                      width: double.infinity,
+                      margin: EdgeInsets.all(12 * s),
+                      padding: EdgeInsets.all(12 * s),
                       decoration: BoxDecoration(
                         color: Colors.grey[900],
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(10 * s),
                         border: Border.all(color: gold, width: 1),
                       ),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(name, style: const TextStyle(color: gold, fontWeight: FontWeight.bold)),
-                          Row(
-                            children: [
-                              _pill('Tava', trays.toString()),
-                              const SizedBox(width: 8),
-                              _pill('Adet', units.toString()),
-                            ],
+                          Expanded(
+                            child: FittedBox(
+                              alignment: Alignment.centerLeft,
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'Toplam Tava: $totalTrays',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14 * s,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: 8 * s),
+                          Expanded(
+                            child: FittedBox(
+                              alignment: Alignment.centerRight,
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'Toplam Adet: $totalUnits',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14 * s,
+                                ),
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          );
-        },
+                    ),
+
+                    // ürün listesi
+                    Expanded(
+                      child: ListView.separated(
+                        padding: EdgeInsets.fromLTRB(12 * s, 6 * s, 12 * s, 12 * s),
+                        itemCount: docs.length,
+                        separatorBuilder: (_, __) => SizedBox(height: 10 * s),
+                        itemBuilder: (_, i) {
+                          final m = docs[i].data();
+                          final name = (m['productName'] ?? '-') as String;
+                          final trays = (m['trays'] as num? ?? 0).toInt();
+                          final units = (m['units'] as num? ?? 0).toInt();
+
+                          return Container(
+                            padding: EdgeInsets.all(12 * s),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[900],
+                              borderRadius: BorderRadius.circular(12 * s),
+                              border: Border.all(color: gold, width: 1),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                // Ürün adı (sol) – genişleyebilir
+                                Expanded(
+                                  child: Text(
+                                    name,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: gold,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14 * s,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: 8 * s),
+
+                                // Değerler (sağ) – wrap ile taşmadan alt satıra iner
+                                Flexible(
+                                  child: Wrap(
+                                    alignment: WrapAlignment.end,
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    spacing: 8 * s,
+                                    runSpacing: 6 * s,
+                                    children: [
+                                      _pill(context, 'Tava', trays.toString()),
+                                      _pill(context, 'Adet', units.toString()),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _pill(String label, String value) {
+  Widget _pill(BuildContext context, String label, String value) {
     const gold = Color(0xFFFFD700);
+    final s = _scaleFor(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: EdgeInsets.symmetric(horizontal: 10 * s, vertical: 6 * s),
       decoration: BoxDecoration(
-        border: Border.all(color: gold),
+        border: Border.all(color: gold, width: 1),
         color: Colors.black,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(999 * s),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text('$label: ', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Text(
+            '$label: ',
+            style: TextStyle(color: Colors.white70, fontSize: 12 * s),
+          ),
           Text(
             value,
-            style: const TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 14),
+            style: TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 14 * s),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// AdminDailyPicker’dan gelen agregasyonun üstte küçük özeti
+class _AdminSummaryBanner extends StatelessWidget {
+  const _AdminSummaryBanner({required this.initialItems});
+  final List<Map<String, dynamic>> initialItems;
+
+  @override
+  Widget build(BuildContext context) {
+    const gold = Color(0xFFFFD700);
+    final s = _scaleFor(context);
+
+    int tTrays = 0, tUnits = 0;
+    for (final m in initialItems) {
+      tTrays += (m['trays'] as int?) ?? 0;
+      tUnits += (m['units'] as int?) ?? 0;
+    }
+
+    return Container(
+      width: double.infinity,
+      margin: EdgeInsets.fromLTRB(12 * s, 12 * s, 12 * s, 0),
+      padding: EdgeInsets.all(12 * s),
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        border: Border.all(color: gold, width: 1),
+        borderRadius: BorderRadius.circular(10 * s),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Admin Özeti',
+              style: TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 14 * s)),
+          SizedBox(height: 6 * s),
+          Text(
+            'Toplam Tava: $tTrays • Toplam Adet: $tUnits',
+            style: TextStyle(color: Colors.white70, fontSize: 12 * s),
           ),
         ],
       ),
@@ -243,4 +397,19 @@ Future<void> decrementProductionUnitsByName({
       SetOptions(merge: true),
     );
   });
+}
+
+/// -------------------------
+/// Responsive ölçek yardımcı
+/// -------------------------
+double _scaleFor(BuildContext context) {
+  final mq = MediaQuery.of(context);
+  // shortestSide: telefonlar için yatay/dikey fark etmeden en güvenli metrik
+  final shortest = mq.size.shortestSide; // dp
+  // 360dp taban kabul (orta boy telefon). 4" civarı ~320dp → ~0.9; 7" civarı daha büyük → >1.0
+  double s = shortest / 360.0;
+  // Aşırı küçülme/büyümeyi sınırlayalım:
+  if (s < 0.85) s = 0.85; // çok küçük ekranlarda bile okunabilir kalsın
+  if (s > 1.35) s = 1.35; // çok büyük telefon/tabletlerde aşırı büyütmeyelim
+  return s;
 }

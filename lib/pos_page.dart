@@ -47,8 +47,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
     return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
   }
 
-  /// İsteğe bağlı seed:
-  /// - Sadece **yoksa** oluşturur, var olan ürün/fiyatlara dokunmaz.
+  /// İsteğe bağlı seed (kapalı):
   Future<void> _seedProductsUpsert() async {
     final col = db.collection('products');
     final now = Timestamp.fromDate(DateTime.now());
@@ -208,50 +207,181 @@ class _PosSalesPageState extends State<PosSalesPage> {
     });
   }
 
-  // ---- ÖDEME TİPİ SEÇ ----
-  Future<String?> _choosePaymentType() async {
-    return showDialog<String>(
+  // ---- ÖDEME SEÇ + (Nakit için) VERİLEN TUTAR & PARA ÜSTÜ ----
+  Future<Map<String, dynamic>?> _choosePaymentDialog(num total) async {
+    return showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.black,
-        title: const Text('Ödeme Türü Seç', style: TextStyle(color: Color(0xFFFFD700))),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700), foregroundColor: Colors.black),
-              onPressed: () => Navigator.pop(ctx, 'Nakit'),
-              child: const Text('💵 Nakit'),
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700), foregroundColor: Colors.black),
-              onPressed: () => Navigator.pop(ctx, 'Kart'),
-              child: const Text('💳 Kart'),
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700), foregroundColor: Colors.black),
-              onPressed: () => Navigator.pop(ctx, 'Veresiye'),
-              child: const Text('📒 Veresiye'),
-            ),
-          ],
-        ),
-      ),
+      barrierDismissible: false,
+      builder: (ctx) {
+        String selected = 'Nakit'; // varsayılan
+        final amountCtrl = TextEditingController();
+        double paid = 0.0;
+
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            double delta = paid - total;
+            final bool isCash = selected == 'Nakit';
+
+            Widget bigMoneyText() {
+              if (!isCash) return const SizedBox.shrink();
+              final bool ok = delta >= 0;
+              final label = ok ? 'Para Üstü' : 'Eksik';
+              final value = (ok ? delta : -delta).toStringAsFixed(2);
+              final color = ok ? const Color(0xFFFFD700) : Colors.redAccent;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      '$label:',
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '₺$value',
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 30, // ✅ büyük yazı
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            Widget cashInput() {
+              if (!isCash) return const SizedBox.shrink();
+              return Column(
+                children: [
+                  TextField(
+                    controller: amountCtrl,
+                    autofocus: true,
+                    style: const TextStyle(color: Colors.white, fontSize: 20),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText: 'Verilen Tutar (₺)',
+                      labelStyle: const TextStyle(color: Color(0xFFFFD700)),
+                      hintText: 'Örn: 200',
+                      hintStyle: const TextStyle(color: Colors.grey),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.amber.shade700),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.amber.shade400, width: 2),
+                      ),
+                    ),
+                    onChanged: (s) {
+                      final v = double.tryParse(s.replaceAll(',', '.')) ?? 0.0;
+                      setLocal(() {
+                        paid = v;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              );
+            }
+
+            Widget bigPayButton(String label, String type, String emoji) {
+              final bool active = selected == type;
+              return Expanded(
+                child: ElevatedButton(
+                  onPressed: () {
+                    setLocal(() => selected = type);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: active ? const Color(0xFFFFD700) : Colors.grey[800],
+                    foregroundColor: active ? Colors.black : Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    '$emoji  $label',
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              );
+            }
+
+            return AlertDialog(
+              backgroundColor: Colors.black,
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Ödeme', style: TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Toplam: ₺${total.toStringAsFixed(2)}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 16),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Büyük seçenek butonları
+                    Row(
+                      children: [
+                        bigPayButton('Nakit', 'Nakit', '💵'),
+                        const SizedBox(width: 8),
+                        bigPayButton('Kart', 'Kart', '💳'),
+                        const SizedBox(width: 8),
+                        bigPayButton('Veresiye', 'Veresiye', '📒'),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Nakit için "Para Üstü" büyük yazı + verilen tutar girişi
+                    bigMoneyText(),
+                    cashInput(),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx), // iptal
+                  child: const Text('İptal', style: TextStyle(color: Colors.redAccent, fontSize: 16)),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    // Nakitse amount al, değilse 0 olarak dön
+                    final result = <String, dynamic>{
+                      'type': selected,
+                      'paid': selected == 'Nakit' ? paid : null,
+                      'change': selected == 'Nakit' ? max(0.0, paid - total) : null,
+                    };
+                    Navigator.pop(ctx, result);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFD700),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('Onayla', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
   /// POS ürün adını üretim (production) adlarına dönüştür.
-  /// Not: Buradaki eşleştirmeyi ihtiyacına göre genişletebilirsin.
   String _mapToProductionName(String posName) {
-    // Küçük alias örnekleri:
     const aliases = <String, String>{
       // POS -> Production
       'Kaşarlı': 'Kaşarlı Börek',
       'Kaşarlı Börek': 'Kaşarlı Börek',
-      'K.Simit': 'Küçük Poğaça', // sadece örnek; doğru karşılığına göre düzelt
-      // 'Simit': 'Beyaz Simit',  // gerekiyorsa aç
-      // 'Açma': 'Açma',         // aynı ise yazmana gerek yok
+      'K.Simit': 'Küçük Poğaça',
     };
     return aliases[posName] ?? posName;
   }
@@ -260,19 +390,26 @@ class _PosSalesPageState extends State<PosSalesPage> {
     if (_saving) return;
     if (cart.isEmpty) return;
 
-    // Önce ödeme tipi
-    final paymentType = await _choosePaymentType();
-    if (paymentType == null) return;
+    final total = _cartTotal();
+
+    // ✅ Yeni: ödeme diyaloğu (büyük butonlar + nakitte para üstü hesap)
+    final payment = await _choosePaymentDialog(total);
+    if (payment == null) return;
+
+    final String paymentType = payment['type'] as String;
+    final num? paidAmount = payment['paid'] as num?;
+    final num? change = payment['change'] as num?;
 
     setState(() => _saving = true);
 
     try {
-      final total = _cartTotal();
       final orderRef = db.collection('orders').doc();
       await orderRef.set({
         'userId': widget.userId,
         'totalPrice': total,
-        'paymentType': paymentType, // <-- kaydedildi
+        'paymentType': paymentType,
+        if (paymentType == 'Nakit') 'paidAmount': paidAmount,
+        if (paymentType == 'Nakit') 'change': change,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -329,9 +466,12 @@ class _PosSalesPageState extends State<PosSalesPage> {
         cart.clear();
         _cartOrder.clear();
       });
+
+      // ✅ Snackbar: Para üstü bilgisi (nakit ise)
+      final extra = paymentType == 'Nakit' ? ' • Para Üstü: ₺${(change ?? 0).toStringAsFixed(2)}' : '';
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Onaylandı ✅ $paymentType • ₺${total.toStringAsFixed(2)}')),
+          SnackBar(content: Text('Onaylandı ✅ $paymentType • ₺${total.toStringAsFixed(2)}$extra')),
         );
       }
     } catch (e) {
@@ -417,12 +557,6 @@ class _PosSalesPageState extends State<PosSalesPage> {
                 );
               },
             ),
-          // ❌ Seed butonu kaldırıldı ki fiyatları bozmasın
-          // IconButton(
-          //   icon: const Icon(Icons.cloud_download, color: gold),
-          //   tooltip: 'Ürünleri yükle/güncelle',
-          //   onPressed: () async { await _seedProductsUpsert(); },
-          // ),
           IconButton(
             icon: const Icon(Icons.history, color: gold),
             tooltip: "Satış Geçmişi",
@@ -507,6 +641,10 @@ class _PosSalesPageState extends State<PosSalesPage> {
                         ? '${(inCart['kg'] as num).toStringAsFixed(2)} kg'
                         : '${inCart['qty']} adet');
 
+                    // --- Yalnızca "Sosyete" için hızlı ekleme rozetleri ---
+                    final isSosyete = (!isWeighted) &&
+                        (name.trim().toLowerCase() == 'sosyete' || p.id.trim().toLowerCase() == 'sosyete');
+
                     return Stack(
                       fit: StackFit.expand,
                       children: [
@@ -566,8 +704,8 @@ class _PosSalesPageState extends State<PosSalesPage> {
                           ),
                         ),
 
-                        // Sol üst 5x
-                        if (!isWeighted)
+                        // --- Hızlı ekleme rozetleri: SADECE Sosyete ---
+                        if (isSosyete)
                           Positioned(
                             top: 2,
                             left: 2,
@@ -576,9 +714,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
                               child: _quickAdd('5x'),
                             ),
                           ),
-
-                        // Sağ üst 10x
-                        if (!isWeighted)
+                        if (isSosyete)
                           Positioned(
                             top: 2,
                             right: 2,
@@ -600,13 +736,13 @@ class _PosSalesPageState extends State<PosSalesPage> {
             padding: const EdgeInsets.all(12),
             decoration: const BoxDecoration(
               color: Colors.black,
-              border: Border(top: BorderSide(color: gold)),
+              border: Border(top: BorderSide(color: Color(0xFFFFD700))),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (cart.isEmpty)
-                  const Text('Sepet boş', style: TextStyle(color: gold))
+                  const Text('Sepet boş', style: TextStyle(color: Color(0xFFFFD700)))
                 else ...[
                   SizedBox(
                     height: 74,
@@ -630,13 +766,13 @@ class _PosSalesPageState extends State<PosSalesPage> {
                               margin: const EdgeInsets.only(right: 8),
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                               decoration: BoxDecoration(
-                                border: Border.all(color: gold),
+                                border: Border.all(color: const Color(0xFFFFD700)),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Center(
                                 child: Text(
                                   label,
-                                  style: const TextStyle(color: gold, fontSize: 12),
+                                  style: const TextStyle(color: Color(0xFFFFD700), fontSize: 12),
                                 ),
                               ),
                             ),
@@ -654,13 +790,13 @@ class _PosSalesPageState extends State<PosSalesPage> {
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: gold,
+                            color: Color(0xFFFFD700),
                           ),
                         ),
                       ),
                       ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: gold,
+                          backgroundColor: const Color(0xFFFFD700),
                           foregroundColor: Colors.black,
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         ),

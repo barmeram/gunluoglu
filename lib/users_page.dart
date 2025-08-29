@@ -4,6 +4,7 @@
 // ✅ Hızlı Menüye: “Üretimin Ürünü Düzenle” eklendi (ProductionManagePage’e gider)
 // ✅ Kullanıcı listesinde durum göstergesi: yeşil=aktif, kırmızı=engelli (isActive)
 // ✅ Admin: Kullanıcıyı engelle / engeli kaldır (isActive toggle)
+// ✅ Hızlı Menüye: Stok (Gün Seç) eklendi → AdminDailyPickerPage
 // Not: Dışarı Ürünler -> customer_products koleksiyonunu yönetir (ProductManageForCustomerPage)
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 // Sayfalar
 import 'package:gunluogluproje/CompetitionPage.dart'; // Satış Yarışı sayfası
 import 'baker_stock_page.dart';
+import 'package:gunluogluproje/AdminDailyPickerPage.dart' hide BakerStockPage; // 🔹 Eklendi: Gün seçerek stok inceleme
 import 'user_revenue_page.dart';
 import 'pos_page.dart';
 import 'all_revenue_page.dart';
@@ -184,11 +186,12 @@ class _UsersPageState extends State<UsersPage> {
         child: SafeArea(
           child: Column(
             children: [
-              // Üst başlık
+              // Üst başlık (FIX: Row artık Container'ın child'ı)
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
                 decoration: const BoxDecoration(
-                    border: Border(bottom: BorderSide(color: Color(0x33FFD700)))),
+                  border: Border(bottom: BorderSide(color: Color(0x33FFD700))),
+                ),
                 child: Row(
                   children: [
                     const Icon(Icons.menu_open, color: gold),
@@ -280,15 +283,36 @@ class _UsersPageState extends State<UsersPage> {
                         );
                       },
                     ),
+                    // 🔸 Stoklar (BUGÜN) → BakerStockPage (bugün)
                     menuTile(
                       icon: Icons.inventory,
-                      title: 'Stoklar',
-                      subtitle: 'Fırın stok takibi ve ürün güncelleme',
+                      title: 'Stoklar (Bugün)',
+                      subtitle: 'Bugünkü fırın stokları ve ürünler',
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => BakerStockPage(userId: widget.currentUid)),
+                          MaterialPageRoute(
+                            builder: (_) => BakerStockPage(
+                              userId: widget.currentUid,
+                              dayLabel: _todayKey(), // açıkça bugünü veriyoruz
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    // 🔸 STOK (GÜN SEÇ) → AdminDailyPickerPage
+                    menuTile(
+                      icon: Icons.calendar_month_outlined,
+                      title: 'Stok (Gün Seç)',
+                      subtitle: 'Belirli bir günü incele / Baker Stok’a gönder',
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AdminDailyPickerPage(userId: widget.currentUid),
+                          ),
                         );
                       },
                     ),
@@ -387,14 +411,12 @@ class _UsersPageState extends State<UsersPage> {
           style: TextStyle(color: gold, fontWeight: FontWeight.bold),
         ),
         actions: [
-          if (isAdmin) ...[
-            // 🔹 SADECE hızlı menü ikonu kaldı
+          if (isAdmin)
             IconButton(
               tooltip: 'Hızlı Menü',
               icon: const Icon(Icons.menu_open, color: gold),
               onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
             ),
-          ],
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(60),
@@ -455,7 +477,7 @@ class _UsersPageState extends State<UsersPage> {
             return name.contains(q) || email.contains(q);
           }).toList();
 
-          // Sıralama
+          // Sıralama (önce yeni oluşturulanlar)
           filtered.sort((a, b) {
             final ta = a.data()['createdAt'];
             final tb = b.data()['createdAt'];

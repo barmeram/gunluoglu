@@ -15,15 +15,23 @@ class _CompetitionPageState extends State<CompetitionPage> {
 
   bool loading = true;      // veri/rol yüklenirken
   bool hasAccess = false;   // sadece admin görebilsin
-  String? role;             // kullanıcının rolü (debug/ilerisi için)
+  String? role;             // kullanıcının rolü
 
-  // Satış toplamları
+  // Satış toplamları (kullanıcıya göre)
   Map<String, double> today = {};
+  Map<String, double> week = {};   // ✅ YENİ: Bu Hafta
   Map<String, double> month = {};
   Map<String, double> year = {};
 
-  // ✅ uid -> görünen isim (name yoksa email, o da yoksa uid)
+  // uid -> görünen isim (name yoksa email, o da yoksa uid)
   Map<String, String> userNames = {};
+
+  // ------ STEP 1: Responsive yardımcı ------
+  double _rsp(BuildContext ctx, double base) {
+    final w = MediaQuery.of(ctx).size.width; // 320..430 arası (telefon)
+    final scale = (w / 390).clamp(0.85, 1.15);
+    return base * scale;
+  }
 
   @override
   void initState() {
@@ -31,7 +39,7 @@ class _CompetitionPageState extends State<CompetitionPage> {
     _checkRoleAndLoad(); // önce rolü kontrol et
   }
 
-  // ---------- ROL KONTROLÜ ----------
+  // ------ STEP 2: Rol Kontrolü ------
   Future<void> _checkRoleAndLoad() async {
     setState(() => loading = true);
 
@@ -51,12 +59,10 @@ class _CompetitionPageState extends State<CompetitionPage> {
       hasAccess = role == 'admin';
 
       if (hasAccess) {
-        // Admin ise önce kullanıcı isimlerini, sonra satışları yükle
-        await _loadUsers();
-        await _loadCompetition();
-      } else {
-        setState(() => loading = false);
+        await _loadUsers();       // isimleri çek
+        await _loadCompetition(); // satışları çek
       }
+      setState(() => loading = false);
     } catch (e) {
       setState(() {
         hasAccess = false;
@@ -70,7 +76,7 @@ class _CompetitionPageState extends State<CompetitionPage> {
     }
   }
 
-  // ---------- USERS'tan isimleri çek ----------
+  // ------ STEP 3: USERS'tan isimleri çek ------
   Future<void> _loadUsers() async {
     try {
       final qs = await db.collection('users').get();
@@ -82,7 +88,6 @@ class _CompetitionPageState extends State<CompetitionPage> {
       }
       userNames = map;
     } catch (e) {
-      // İsimler yüklenemese bile satışları gösterebiliriz (uid ile)
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Kullanıcı isimleri alınamadı: $e')),
@@ -91,45 +96,75 @@ class _CompetitionPageState extends State<CompetitionPage> {
     }
   }
 
-  // ---------- TARİH YARDIMCILARI ----------
+  // ------ STEP 4: Tarih yardımcıları ------
   DateTime _startOfDay(DateTime d) => DateTime(d.year, d.month, d.day);
-  DateTime _startOfMonth(DateTime d) => DateTime(d.year, d.month, 1);
-  DateTime _startOfYear(DateTime d) => DateTime(d.year, 1, 1);
+  DateTime _startOfNextDay(DateTime d) => _startOfDay(d).add(const Duration(days: 1));
 
-  // ---------- KULLANICIYA GÖRE TOPLAM ----------
-  Future<Map<String, double>> _sumByUser(DateTime start) async {
+  DateTime _startOfWeek(DateTime d) {
+    // Pazartesi başlangıç
+    final diff = d.weekday - DateTime.monday; // 0..6
+    return _startOfDay(d).subtract(Duration(days: diff));
+  }
+
+  DateTime _startOfNextWeek(DateTime d) => _startOfWeek(d).add(const Duration(days: 7));
+
+  DateTime _startOfMonth(DateTime d) => DateTime(d.year, d.month, 1);
+  DateTime _startOfNextMonth(DateTime d) => DateTime(d.year, d.month + 1, 1);
+
+  DateTime _startOfYear(DateTime d) => DateTime(d.year, 1, 1);
+  DateTime _startOfNextYear(DateTime d) => DateTime(d.year + 1, 1, 1);
+
+  // ------ STEP 5: Aralıkta kullanıcıya göre toplam ------
+  Future<Map<String, double>> _sumByUserBetween(DateTime start, DateTime end) async {
+    // createdAt >= start AND createdAt < end
     final qs = await db
         .collection('orders')
         .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+        .where('createdAt', isLessThan: Timestamp.fromDate(end))
         .get();
 
     final Map<String, double> out = {};
     for (final doc in qs.docs) {
       final m = doc.data();
-      final uid = m['userId'] ?? '??'; // siparişi açan kişi
+      final uid = (m['userId'] ?? '??').toString();
       final price = (m['totalPrice'] as num?)?.toDouble() ?? 0.0;
       out[uid] = (out[uid] ?? 0) + price;
     }
     return out;
   }
 
-  // ---------- SATIŞLARI YÜKLE ----------
+  // ------ STEP 6: Satışları yükle (Gün/Hafta/Ay/Yıl) ------
   Future<void> _loadCompetition() async {
-    if (!hasAccess) return; // güvenli
+    if (!hasAccess) return;
     setState(() => loading = true);
 
     final now = DateTime.now();
+
+    final dayStart = _startOfDay(now);
+    final dayEnd = _startOfNextDay(now);
+
+    final weekStart = _startOfWeek(now);
+    final weekEnd = _startOfNextWeek(now);
+
+    final monthStart = _startOfMonth(now);
+    final monthEnd = _startOfNextMonth(now);
+
+    final yearStart = _startOfYear(now);
+    final yearEnd = _startOfNextYear(now);
+
     try {
       final results = await Future.wait([
-        _sumByUser(_startOfDay(now)),   // bugün
-        _sumByUser(_startOfMonth(now)), // bu ay
-        _sumByUser(_startOfYear(now)),  // bu yıl
+        _sumByUserBetween(dayStart, dayEnd),     // bugün
+        _sumByUserBetween(weekStart, weekEnd),   // ✅ bu hafta
+        _sumByUserBetween(monthStart, monthEnd), // bu ay
+        _sumByUserBetween(yearStart, yearEnd),   // bu yıl
       ]);
 
       setState(() {
         today = results[0];
-        month = results[1];
-        year = results[2];
+        week  = results[1];
+        month = results[2];
+        year  = results[3];
         loading = false;
       });
     } catch (e) {
@@ -142,15 +177,48 @@ class _CompetitionPageState extends State<CompetitionPage> {
     }
   }
 
-  // ---------- TOPTAN YENİLE ----------
+  // ------ STEP 7: Toptan yenile ------
   Future<void> _refreshAll() async {
-    // hem isimleri hem satışları güncelle
     await _loadUsers();
     await _loadCompetition();
   }
 
-  // ---------- LİSTE KARTI ----------
-  Widget _buildRanking(String title, Map<String, double> data) {
+  // ------ STEP 8: Başlık + Toplam satırı ------
+  Widget _sectionHeader(BuildContext context, String title, Map<String, double> data) {
+    const gold = Color(0xFFFFD700);
+    final total = data.values.fold<double>(0.0, (p, c) => p + c);
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: gold,
+              fontSize: _rsp(context, 16),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        // miktar sığmazsa küçült
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            "₺${total.toStringAsFixed(2)}",
+            style: TextStyle(
+              color: gold,
+              fontWeight: FontWeight.w700,
+              fontSize: _rsp(context, 14),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ------ STEP 9: Sıralama kartı (responsive) ------
+  Widget _buildRanking(BuildContext context, String title, Map<String, double> data) {
     final sorted = data.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value)); // çok satan en üstte
 
@@ -159,33 +227,40 @@ class _CompetitionPageState extends State<CompetitionPage> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: const TextStyle(
-                  color: Color(0xFFFFD700),
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                )),
-            const SizedBox(height: 8),
+            _sectionHeader(context, title, data),
+            const SizedBox(height: 10),
+            if (sorted.isEmpty)
+              Text("Kayıt yok",
+                  style: TextStyle(color: Colors.white54, fontSize: _rsp(context, 12))),
             for (final e in sorted)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
+                padding: const EdgeInsets.symmetric(vertical: 6),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // ✅ uid yerine isim göster
-                    Text(
-                      userNames[e.key] ?? e.key,
-                      style: const TextStyle(color: Colors.white70),
+                    // İsim sütunu (uzunsa ellipsis)
+                    Expanded(
+                      child: Text(
+                        userNames[e.key] ?? e.key,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: Colors.white70, fontSize: _rsp(context, 13)),
+                      ),
                     ),
-                    Text(
-                      "₺${e.value.toStringAsFixed(2)}",
-                      style: const TextStyle(
-                        color: Color(0xFFFFD700),
-                        fontWeight: FontWeight.w600,
+                    const SizedBox(width: 8),
+                    // Miktar (FittedBox ile taşmayı engelle)
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        "₺${e.value.toStringAsFixed(2)}",
+                        style: TextStyle(
+                          color: const Color(0xFFFFD700),
+                          fontWeight: FontWeight.w600,
+                          fontSize: _rsp(context, 13),
+                        ),
                       ),
                     ),
                   ],
@@ -197,6 +272,52 @@ class _CompetitionPageState extends State<CompetitionPage> {
     );
   }
 
+  // ------ STEP 10: Özet çubukları (üstte, yatay kayar) ------
+  Widget _quickSummary(BuildContext context) {
+    const gold = Color(0xFFFFD700);
+    Widget chip(String label, Map<String, double> data, IconData icon) {
+      final total = data.values.fold<double>(0.0, (p, c) => p + c);
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        margin: const EdgeInsets.only(right: 10),
+        decoration: BoxDecoration(
+          color: Colors.grey[900],
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: gold.withOpacity(0.7)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: gold, size: _rsp(context, 14)),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(color: Colors.white70, fontSize: _rsp(context, 12))),
+            const SizedBox(width: 8),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                "₺${total.toStringAsFixed(2)}",
+                style: TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: _rsp(context, 12)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      child: Row(
+        children: [
+          chip("Bugün", today, Icons.today),
+          chip("Bu Hafta", week, Icons.view_week),   // ✅ Haftalık özet
+          chip("Bu Ay", month, Icons.calendar_month),
+          chip("Bu Yıl", year, Icons.calendar_today),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     const gold = Color(0xFFFFD700);
@@ -204,9 +325,9 @@ class _CompetitionPageState extends State<CompetitionPage> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           "Satış Yarışı",
-          style: TextStyle(color: gold, fontWeight: FontWeight.bold),
+          style: TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: _rsp(context, 18)),
         ),
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: gold),
@@ -221,7 +342,6 @@ class _CompetitionPageState extends State<CompetitionPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator(color: gold))
           : (!hasAccess)
-      // Admin değilse erişim yok
           ? Center(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
@@ -248,15 +368,27 @@ class _CompetitionPageState extends State<CompetitionPage> {
           ),
         ),
       )
-      // Admin ise içerik
           : RefreshIndicator(
         onRefresh: _refreshAll,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(bottom: 16),
           children: [
-            _buildRanking("Bugün", today),
-            _buildRanking("Bu Ay", month),
-            _buildRanking("Bu Yıl", year),
+            // Üst özet çubukları (Bugün / Hafta / Ay / Yıl)
+            _quickSummary(context),
+
+            // Sıralama kartları
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: [
+                  _buildRanking(context, "Bugün", today),
+                  _buildRanking(context, "Bu Hafta", week),   // ✅ YENİ
+                  _buildRanking(context, "Bu Ay", month),
+                  _buildRanking(context, "Bu Yıl", year),
+                ],
+              ),
+            ),
           ],
         ),
       ),

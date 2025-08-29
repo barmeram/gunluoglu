@@ -51,18 +51,21 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyCM_ZRi3GtmTypy5BzOcSejERdKjR6LYX4',
-    appId: '1:930829754955:android:89ac03d5069207cab023ce',
+    appId: '1:930829754955:android:42c43ae66b365daeb023ce',
     messagingSenderId: '930829754955',
     projectId: 'gunluoglugiris',
+    databaseURL: 'https://gunluoglugiris-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: 'gunluoglugiris.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyBccQsL23kzrGl_bBcunzDTx41Jgf0yuKQ',
-    appId: '1:930829754955:ios:7790f17330f799ccb023ce',
+    appId: '1:930829754955:ios:e490ab6498f3b7b2b023ce',
     messagingSenderId: '930829754955',
     projectId: 'gunluoglugiris',
+    databaseURL: 'https://gunluoglugiris-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: 'gunluoglugiris.firebasestorage.app',
-    iosBundleId: 'com.example.gunluogluproje',
+    iosBundleId: 'com.omerb.gunluogluproje',
   );
+
 }

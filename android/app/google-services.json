@@ -1,15 +1,16 @@
 {
   "project_info": {
     "project_number": "930829754955",
+    "firebase_url": "https://gunluoglugiris-default-rtdb.europe-west1.firebasedatabase.app",
     "project_id": "gunluoglugiris",
     "storage_bucket": "gunluoglugiris.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:930829754955:android:89ac03d5069207cab023ce",
+        "mobilesdk_app_id": "1:930829754955:android:42c43ae66b365daeb023ce",
         "android_client_info": {
-          "package_name": "com.example.gunluogluproje"
+          "package_name": "com.omerb.gunluogluproje"
         }
       },
       "oauth_client": [],

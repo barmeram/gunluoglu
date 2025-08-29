@@ -1,3 +1,6 @@
+// ============================
+// FILE: baker_tava_page.dart
+// ============================
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -338,8 +341,7 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
           );
         },
       ),
-      bottomNavigationBar:
-      (!_hasAccess || (_pendingTrays.isEmpty && _pendingUnits.isEmpty))
+      bottomNavigationBar: (!_hasAccess || (_pendingTrays.isEmpty && _pendingUnits.isEmpty))
           ? null
           : SafeArea(
         child: Container(
@@ -368,14 +370,13 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
                       margin: const EdgeInsets.only(right: 8),
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
-                        border: Border.all(color: gold),
+                        border: Border.all(color: Color(0xFFFFD700)),
                         borderRadius: BorderRadius.circular(10),
                         color: Colors.black,
                       ),
                       child: Row(
                         children: [
-                          Text("$name • $t tava • $u adet",
-                              style: const TextStyle(color: Colors.white)),
+                          Text("$name • $t tava • $u adet", style: const TextStyle(color: Colors.white)),
                           const SizedBox(width: 8),
                           InkWell(
                             onTap: () => _setPending(name, 0, 0),
@@ -393,7 +394,7 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
                   Expanded(
                     child: Text(
                       "Toplam: $_totalTrays tava • $_totalUnits adet",
-                      style: const TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 16),
+                      style: const TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                   ),
                   TextButton(
@@ -403,7 +404,7 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
                   const SizedBox(width: 8),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: gold,
+                      backgroundColor: const Color(0xFFFFD700),
                       foregroundColor: Colors.black,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -455,8 +456,7 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
               children: [
                 Text(meta.productName, style: const TextStyle(color: gold, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
-                Text("1 tava = ${meta.perTray} adet",
-                    style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text("1 tava = ${meta.perTray} adet", style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
             ),
           ),
