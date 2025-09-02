@@ -27,7 +27,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
   // Sepet (pid -> data)
   final Map<String, Map<String, dynamic>> cart = {};
 
-  // Son eklenenlerin sırası (en sona eklenen en yeni). Altta reverse:true ile solda görünür.
+  // Son eklenenlerin sırası (reverse:true olduğu için solda görünür)
   final List<String> _cartOrder = [];
 
   // Alt sepet scroll (son ekleneni göstermek için)
@@ -38,8 +38,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
   @override
   void initState() {
     super.initState();
-    // ❌ Otomatik seed KAPANDI — fiyatları bozmasın diye
-    // _seedProductsUpsert();
+    // ❌ Otomatik seed KAPALI
   }
 
   String _todayKey() {
@@ -47,44 +46,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
     return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
   }
 
-  /// İsteğe bağlı seed (kapalı):
-  Future<void> _seedProductsUpsert() async {
-    final col = db.collection('products');
-    final now = Timestamp.fromDate(DateTime.now());
-
-    final List<Map<String, dynamic>> items = [
-      {'id': 'sosyete', 'data': {'name': 'Sosyete', 'isWeighted': false, 'price': 10, 'createdAt': now}},
-      {'id': 'simit', 'data': {'name': 'Simit', 'isWeighted': false, 'price': 15, 'createdAt': now}},
-      {'id': 'acma', 'data': {'name': 'Açma', 'isWeighted': false, 'price': 15, 'createdAt': now}},
-      {'id': 'Kasarlı', 'data': {'name': 'Kaşarlı', 'isWeighted': false, 'price': 25, 'createdAt': now}},
-      {'id': 'b_peynırlı', 'data': {'name': 'Beyaz Peynirli', 'isWeighted': false, 'price': 25, 'createdAt': now}},
-      {'id': 'ucgen', 'data': {'name': 'Üçgen', 'isWeighted': false, 'price': 25, 'createdAt': now}},
-      {'id': 'tereyaglı', 'data': {'name': 'Tereyağlı', 'isWeighted': false, 'price': 25, 'createdAt': now}},
-      {'id': 'patatesli', 'data': {'name': 'Patatesli', 'isWeighted': false, 'price': 25, 'createdAt': now}},
-      {'id': 'zeytinli', 'data': {'name': 'Zeytinli', 'isWeighted': false, 'price': 25, 'createdAt': now}},
-      {'id': 'Kasarli_sucuklu_borek', 'data': {'name': 'Kaşarlı Sucuklu Börek', 'isWeighted': false, 'price': 30, 'createdAt': now}},
-      {'id': 'Gul_borek', 'data': {'name': 'Gül Böreği', 'isWeighted': false, 'price': 30, 'createdAt': now}},
-      {'id': 'K_simit', 'data': {'name': 'K.Simit', 'isWeighted': false, 'pricePerKg': 25, 'createdAt': now}},
-      {'id': 'Kasarli_borek', 'data': {'name': 'Kaşarlı Börek', 'isWeighted': false, 'pricePerKg': 30, 'createdAt': now}},
-      {'id': 'Tepsi_borek', 'data': {'name': 'Tepsi Böreği', 'isWeighted': false, 'price': 30, 'createdAt': now}},
-      {'id': 'Pizza', 'data': {'name': 'Pizza', 'isWeighted': false, 'price': 30, 'createdAt': now}},
-      {'id': 'Sandviç', 'data': {'name': 'Sandviç', 'isWeighted': false, 'price': 30, 'createdAt': now}},
-      {'id': 'Cikolatali', 'data': {'name': 'Çikolatalı', 'isWeighted': false, 'price': 30, 'createdAt': now}},
-      {'id': 'Labneli', 'data': {'name': 'Labneli', 'isWeighted': false, 'price': 30, 'createdAt': now}},
-      {'id': 'Acılı', 'data': {'name': 'Acılı', 'isWeighted': false, 'price': 30, 'createdAt': now}},
-      {'id': 'Sosisli', 'data': {'name': 'Sosisli', 'isWeighted': false, 'price': 30, 'createdAt': now}},
-      {'id': 'Tahinli', 'data': {'name': 'Tahinli', 'isWeighted': false, 'price': 30, 'createdAt': now}},
-    ];
-
-    for (final it in items) {
-      final id = it['id'] as String;
-      final ref = col.doc(id);
-      final snap = await ref.get();
-      if (!snap.exists) {
-        await ref.set(it['data'] as Map<String, dynamic>, SetOptions(merge: false));
-      }
-    }
-  }
+  // ------------------------- HESAPLAR -------------------------
 
   num _cartTotal() {
     num t = 0;
@@ -100,20 +62,22 @@ class _PosSalesPageState extends State<PosSalesPage> {
 
   void _bumpOrder(String id) {
     _cartOrder.remove(id);
-    _cartOrder.add(id);
+    _cartOrder.add(id); // en yeni en sonda: reverse:true ile solda görünür
   }
 
   void _scrollToLatest() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_cartScroll.hasClients) {
-        _cartScroll.animateTo(
-          0,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOut,
-        );
-      }
+      if (!_cartScroll.hasClients) return;
+      // reverse:true olduğundan en yeni için minScrollExtent'e kaydır
+      _cartScroll.animateTo(
+        _cartScroll.position.minScrollExtent,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
     });
   }
+
+  // ------------------------- SEPET İŞLEMLERİ -------------------------
 
   void _addPiece(String id, String name, num price, {int count = 1}) {
     setState(() {
@@ -207,13 +171,14 @@ class _PosSalesPageState extends State<PosSalesPage> {
     });
   }
 
-  // ---- ÖDEME SEÇ + (Nakit için) VERİLEN TUTAR & PARA ÜSTÜ ----
+  // ------------------------- ÖDEME -------------------------
+
   Future<Map<String, dynamic>?> _choosePaymentDialog(num total) async {
     return showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        String selected = 'Nakit'; // varsayılan
+        String selected = 'Nakit';
         final amountCtrl = TextEditingController();
         double paid = 0.0;
 
@@ -233,23 +198,9 @@ class _PosSalesPageState extends State<PosSalesPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Text(
-                      '$label:',
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    Text(label, style: TextStyle(color: color, fontSize: 22, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 4),
-                    Text(
-                      '₺$value',
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 30, // ✅ büyük yazı
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                    Text('₺$value', style: TextStyle(color: color, fontSize: 30, fontWeight: FontWeight.w800)),
                   ],
                 ),
               );
@@ -269,18 +220,12 @@ class _PosSalesPageState extends State<PosSalesPage> {
                       labelStyle: const TextStyle(color: Color(0xFFFFD700)),
                       hintText: 'Örn: 200',
                       hintStyle: const TextStyle(color: Colors.grey),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.amber.shade700),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.amber.shade400, width: 2),
-                      ),
+                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.amber.shade700)),
+                      focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFFFFD700), width: 2)),
                     ),
                     onChanged: (s) {
                       final v = double.tryParse(s.replaceAll(',', '.')) ?? 0.0;
-                      setLocal(() {
-                        paid = v;
-                      });
+                      setLocal(() => paid = v);
                     },
                   ),
                   const SizedBox(height: 8),
@@ -292,19 +237,14 @@ class _PosSalesPageState extends State<PosSalesPage> {
               final bool active = selected == type;
               return Expanded(
                 child: ElevatedButton(
-                  onPressed: () {
-                    setLocal(() => selected = type);
-                  },
+                  onPressed: () => setLocal(() => selected = type),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: active ? const Color(0xFFFFD700) : Colors.grey[800],
                     foregroundColor: active ? Colors.black : Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 18),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: Text(
-                    '$emoji  $label',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-                  ),
+                  child: Text('$emoji  $label', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
                 ),
               );
             }
@@ -316,17 +256,13 @@ class _PosSalesPageState extends State<PosSalesPage> {
                 children: [
                   const Text('Ödeme', style: TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
-                  Text(
-                    'Toplam: ₺${total.toStringAsFixed(2)}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 16),
-                  ),
+                  Text('Toplam: ₺${total.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white70, fontSize: 16)),
                 ],
               ),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Büyük seçenek butonları
                     Row(
                       children: [
                         bigPayButton('Nakit', 'Nakit', '💵'),
@@ -337,21 +273,15 @@ class _PosSalesPageState extends State<PosSalesPage> {
                       ],
                     ),
                     const SizedBox(height: 16),
-
-                    // Nakit için "Para Üstü" büyük yazı + verilen tutar girişi
                     bigMoneyText(),
                     cashInput(),
                   ],
                 ),
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx), // iptal
-                  child: const Text('İptal', style: TextStyle(color: Colors.redAccent, fontSize: 16)),
-                ),
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('İptal', style: TextStyle(color: Colors.redAccent, fontSize: 16))),
                 ElevatedButton(
                   onPressed: () {
-                    // Nakitse amount al, değilse 0 olarak dön
                     final result = <String, dynamic>{
                       'type': selected,
                       'paid': selected == 'Nakit' ? paid : null,
@@ -375,10 +305,9 @@ class _PosSalesPageState extends State<PosSalesPage> {
     );
   }
 
-  /// POS ürün adını üretim (production) adlarına dönüştür.
+  // POS adını üretime dönüştür
   String _mapToProductionName(String posName) {
     const aliases = <String, String>{
-      // POS -> Production
       'Kaşarlı': 'Kaşarlı Börek',
       'Kaşarlı Börek': 'Kaşarlı Börek',
       'K.Simit': 'Küçük Poğaça',
@@ -392,7 +321,6 @@ class _PosSalesPageState extends State<PosSalesPage> {
 
     final total = _cartTotal();
 
-    // ✅ Yeni: ödeme diyaloğu (büyük butonlar + nakitte para üstü hesap)
     final payment = await _choosePaymentDialog(total);
     if (payment == null) return;
 
@@ -426,37 +354,24 @@ class _PosSalesPageState extends State<PosSalesPage> {
       });
       await itemsBatch.commit();
 
-      // Hasılat
       await _incrementRevenueSafely(total);
 
-      // Satış sonrası stok düş (sadece adetli ürünler)
+      // Satış sonrası stok düş (adetli)
       final futures = <Future>[];
       cart.forEach((pid, v) {
-        final isWeighted = v['isWeighted'] == true;
-        if (!isWeighted) {
-          final posName = (v['name'] as String?) ?? pid;
-          final productionName = _mapToProductionName(posName);
-          final qty = (v['qty'] as num?)?.toInt() ?? 0;
-          if (qty > 0) {
-            futures.add(decrementProductionUnitsByName(
-              productName: productionName,
-              minusUnits: qty,
-            ));
-          }
+        if (v['isWeighted'] == true) return;
+        final posName = (v['name'] as String?) ?? pid;
+        final productionName = _mapToProductionName(posName);
+        final qty = (v['qty'] as num?)?.toInt() ?? 0;
+        if (qty > 0) {
+          futures.add(decrementProductionUnitsByName(productName: productionName, minusUnits: qty));
         }
       });
-
       try {
         await Future.wait(futures);
       } on FirebaseException catch (e) {
-        if (e.code == 'permission-denied') {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Stok düşümü reddedildi (permission-denied).'),
-              ),
-            );
-          }
+        if (e.code == 'permission-denied' && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stok düşümü reddedildi (permission-denied).')));
         } else {
           rethrow;
         }
@@ -467,12 +382,9 @@ class _PosSalesPageState extends State<PosSalesPage> {
         _cartOrder.clear();
       });
 
-      // ✅ Snackbar: Para üstü bilgisi (nakit ise)
       final extra = paymentType == 'Nakit' ? ' • Para Üstü: ₺${(change ?? 0).toStringAsFixed(2)}' : '';
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Onaylandı ✅ $paymentType • ₺${total.toStringAsFixed(2)}$extra')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Onaylandı ✅ $paymentType • ₺${total.toStringAsFixed(2)}$extra')));
       }
     } catch (e) {
       if (mounted) {
@@ -492,6 +404,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
   }
 
   // --- Türkçe alfabetik sıralama ---
+
   String _lowerTr(String input) {
     var s = input
         .replaceAll('I', 'ı')
@@ -502,6 +415,23 @@ class _PosSalesPageState extends State<PosSalesPage> {
         .replaceAll('Ş', 'ş')
         .replaceAll('Ü', 'ü');
     return s.toLowerCase();
+  }
+
+  // Kelimenin sadece ilk harfini büyüt (TR duyarlı), kalan harfler küçük kalır
+  String _upperFirstTr(String word) {
+    if (word.isEmpty) return word;
+    final lower = _lowerTr(word);
+    const up = {'i': 'İ', 'ı': 'I', 'ş': 'Ş', 'ğ': 'Ğ', 'ç': 'Ç', 'ö': 'Ö', 'ü': 'Ü'};
+    final first = lower[0];
+    final rest = lower.substring(1);
+    final firstUp = up[first] ?? first.toUpperCase();
+    return firstUp + rest;
+  }
+
+  // Title-case (her kelimenin sadece ilk harfi büyük)
+  String _titleCaseTr(String input) {
+    final parts = input.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
+    return parts.map(_upperFirstTr).join(' ');
   }
 
   static const List<String> _trOrder = [
@@ -529,9 +459,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Firestore'dan alıp ekranda TR'ye göre sıralayacağız
     final productsQuery = db.collection('products');
-
     const gold = Color(0xFFFFD700);
 
     return Scaffold(
@@ -561,12 +489,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
             icon: const Icon(Icons.history, color: gold),
             tooltip: "Satış Geçmişi",
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SalesHistoryPage(userId: widget.userId),
-                ),
-              );
+              Navigator.push(context, MaterialPageRoute(builder: (_) => SalesHistoryPage(userId: widget.userId)));
             },
           ),
         ],
@@ -578,13 +501,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
               final v = (snap.data ?? 0).toStringAsFixed(2);
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  'Bugünkü Hasılatım: ₺$v',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: gold,
-                  ),
-                ),
+                child: Text('Bugünkü Hasılatım: ₺$v', style: const TextStyle(fontWeight: FontWeight.w600, color: gold)),
               );
             },
           ),
@@ -608,21 +525,20 @@ class _PosSalesPageState extends State<PosSalesPage> {
                   return const Center(child: Text('Ürün yok', style: TextStyle(color: gold)));
                 }
 
-                // Ekranda Türkçe alfabeye göre sırala
+                // Ekranda TR'ye göre sırala
                 final sorted = [...docs]..sort((a, b) {
                   final na = (a.data()['name'] ?? '-') as String;
                   final nb = (b.data()['name'] ?? '-') as String;
                   return _trCompare(na, nb);
                 });
 
-                // 4 sütun sabit — her cihazda eşit boy, %25 genişlik
                 return GridView.builder(
                   padding: EdgeInsets.zero,
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 4,      // her zaman 4 sütun
-                    crossAxisSpacing: 0,    // %25'i korumak için boşluk yok
-                    mainAxisSpacing: 0,     // %25'i korumak için boşluk yok
-                    childAspectRatio: 1.0,  // kare kutu
+                    crossAxisCount: 4,
+                    crossAxisSpacing: 0,
+                    mainAxisSpacing: 0,
+                    childAspectRatio: 1.0,
                   ),
                   itemCount: sorted.length,
                   itemBuilder: (_, i) {
@@ -630,20 +546,14 @@ class _PosSalesPageState extends State<PosSalesPage> {
                     final d = p.data();
                     final name = (d['name'] ?? '-') as String;
                     final isWeighted = (d['isWeighted'] ?? false) as bool;
-                    final price = isWeighted
-                        ? (d['pricePerKg'] as num? ?? 0)
-                        : (d['price'] as num? ?? 0);
-
-                    final inCart = cart[p.id];
-                    final badge = inCart == null
-                        ? ''
-                        : (inCart['isWeighted'] == true
-                        ? '${(inCart['kg'] as num).toStringAsFixed(2)} kg'
-                        : '${inCart['qty']} adet');
+                    final price = isWeighted ? (d['pricePerKg'] as num? ?? 0) : (d['price'] as num? ?? 0);
 
                     // --- Yalnızca "Sosyete" için hızlı ekleme rozetleri ---
                     final isSosyete = (!isWeighted) &&
                         (name.trim().toLowerCase() == 'sosyete' || p.id.trim().toLowerCase() == 'sosyete');
+
+                    // Sadece ilk harfler büyük (TR title-case) + 1.5× büyük başlık
+                    final displayName = _titleCaseTr(name);
 
                     return Stack(
                       fit: StackFit.expand,
@@ -669,35 +579,27 @@ class _PosSalesPageState extends State<PosSalesPage> {
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Text(
-                                    name,
+                                    displayName,
                                     textAlign: TextAlign.center,
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
+                                      fontWeight: FontWeight.w800,
                                       color: Color(0xFFFFD700),
-                                      fontSize: 12,
+                                      fontSize: 20, // 12 → 18 (1.5×)
+                                      height: 1.05,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
+                                  const SizedBox(height: 6),
                                   Text(
                                     isWeighted ? '₺$price / kg' : '₺$price',
                                     style: const TextStyle(
                                       color: Color(0xFFFFD700),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  if (badge.isNotEmpty)
-                                    Text(
-                                      'Sepette: $badge',
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Color(0xFFFFD700),
-                                      ),
-                                    ),
+                                  // Ürün kartlarında "Sepette" yazısı gösterilmiyor
                                 ],
                               ),
                             ),
@@ -731,7 +633,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
             ),
           ),
 
-          // ALT SEPET BAR
+          // ALT SEPET BAR — yatay scroll, kutucuk içinde AD (üstte) ve ADET/KG (dipte)
           Container(
             padding: const EdgeInsets.all(12),
             decoration: const BoxDecoration(
@@ -757,25 +659,13 @@ class _PosSalesPageState extends State<PosSalesPage> {
                         ];
                         return ids.map((id) {
                           final v = cart[id]!;
-                          final label = v['isWeighted'] == true
-                              ? '${v['name']} • ${(v['kg'] as num).toStringAsFixed(2)} kg'
-                              : '${v['name']} • ${v['qty']} adet';
-                          return GestureDetector(
-                            onTap: () => _removeOne(id), // çubukta tıklayınca 1 azalt
-                            child: Container(
-                              margin: const EdgeInsets.only(right: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                              decoration: BoxDecoration(
-                                border: Border.all(color: const Color(0xFFFFD700)),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  label,
-                                  style: const TextStyle(color: Color(0xFFFFD700), fontSize: 12),
-                                ),
-                              ),
-                            ),
+                          final isWeighted = v['isWeighted'] == true;
+                          return _cartChip(
+                            id: id,
+                            name: (v['name'] ?? '-') as String,
+                            isWeighted: isWeighted,
+                            qty: isWeighted ? null : (v['qty'] as num?),
+                            kg: isWeighted ? (v['kg'] as num?) : null,
                           );
                         }).toList();
                       }(),
@@ -787,11 +677,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
                       Expanded(
                         child: Text(
                           'Toplam: ₺${_cartTotal().toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFFFFD700),
-                          ),
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFFFFD700)),
                         ),
                       ),
                       ElevatedButton.icon(
@@ -815,22 +701,90 @@ class _PosSalesPageState extends State<PosSalesPage> {
     );
   }
 
+  // 🔽 Sepet kutucuğu: minimum genişlikte, isim fade ile kesilsin (… yok), miktar clip
+  // IntrinsicWidth + ConstrainedBox => içerik kadar dar, ama [56..120] aralığında.
+  Widget _cartChip({
+    required String id,
+    required String name,
+    required bool isWeighted,
+    required num? qty,
+    required num? kg,
+  }) {
+    final qtyText = isWeighted ? '${(kg ?? 0).toStringAsFixed(2)} kg' : '${(qty ?? 0)} adet';
+
+    // Sadece ilk harfler büyük; sonra kelimeleri alt alta yaz
+    final displayName = _titleCaseTr(name).split(RegExp(r'\s+')).join('\n');
+
+    return GestureDetector(
+      onTap: () {
+        if (!isWeighted) _removeOne(id); // adetli üründe 1 azalt
+      },
+      child: SizedBox(
+        height: double.infinity, // ListView item yüksekliğini doldur
+        child: IntrinsicWidth( // << minimum gerekli genişlik
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              minWidth: 56,  // daha dar olmasın
+              maxWidth: 120, // çok genişlemesin
+            ),
+            child: Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFFFFD700)),
+                borderRadius: BorderRadius.circular(8),
+                color: Colors.transparent,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.max,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // İsim alanı (baş harfler büyük) — ellipsis yerine fade
+                  Expanded(
+                    child: Text(
+                      displayName,
+                      textAlign: TextAlign.start,
+                      softWrap: true,
+                      maxLines: 3,
+                      overflow: TextOverflow.fade, // <<< … yok
+                      style: const TextStyle(
+                        color: Color(0xFFFFD700),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        height: 1.05,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  // Miktar dipte sabit — ellipsis yok, clip
+                  Align(
+                    alignment: Alignment.bottomLeft,
+                    child: Text(
+                      qtyText,
+                      maxLines: 1,
+                      overflow: TextOverflow.clip, // <<< … yok
+                      style: const TextStyle(
+                        color: Color(0xFFFFD700),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // Küçük 5x/10x rozetleri
   Widget _quickAdd(String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.black45,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: Colors.amber,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
+      decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(6)),
+      child: Text(text, style: const TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
     );
   }
 }
