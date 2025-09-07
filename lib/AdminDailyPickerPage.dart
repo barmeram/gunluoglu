@@ -1,9 +1,10 @@
 // ===================================
 // FILE: admin_daily_picker_page.dart
 // ===================================
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-// Dosya yolun doğruysa bu import tamam:
+import 'package:shared_preferences/shared_preferences.dart'; // ✅ kalıcılık
 import 'package:gunluogluproje/baker_stock_page.dart';
 
 class AdminDailyPickerPage extends StatefulWidget {
@@ -18,13 +19,19 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
   final db = FirebaseFirestore.instance;
   static const gold = Color(0xFFFFD700);
 
+  static const _prefsKeySelectedDay = 'admin_daily_picker_selected_day';
+
+  // Son N gün listesi
   late final List<String> _last3 = _computeLastNDays(3);
+
+  // Ekran seçimi
   String _selectedDay = '';
 
   @override
   void initState() {
     super.initState();
-    _selectedDay = _last3.first; // bugün
+    _selectedDay = _last3.first; // varsayılan bugün
+    _loadSelectedDayFromPrefs(); // ✅ varsa önceki seçimi yükle
   }
 
   List<String> _computeLastNDays(int n) {
@@ -35,9 +42,23 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
     });
   }
 
-  /// Dokümanlardan productName bazında tava/adet toplayıp sıralı liste döndürür
+  Future<void> _loadSelectedDayFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_prefsKeySelectedDay);
+    if (!mounted) return;
+    if (saved != null && _last3.contains(saved)) {
+      setState(() => _selectedDay = saved);
+    }
+  }
+
+  Future<void> _saveSelectedDayToPrefs(String day) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsKeySelectedDay, day);
+  }
+
   List<Map<String, dynamic>> _aggregateDocs(
-      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+      ) {
     final Map<String, Map<String, dynamic>> agg = {};
     for (final d in docs) {
       final m = d.data();
@@ -48,10 +69,15 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
       final trays   = (m['trays']   as num?)?.toInt() ?? 0;
       final units   = (m['units']   as num?)?.toInt() ?? 0;
 
-      final rec = agg[name] ?? {'productName': name, 'perTray': perTray, 'trays': 0, 'units': 0};
-      rec['trays']   = (rec['trays'] as int) + trays;
-      rec['units']   = (rec['units'] as int) + units;
-      rec['perTray'] = rec['perTray'] ?? perTray;
+      final rec = agg[name] ?? {
+        'productName': name,
+        'perTray': perTray,
+        'trays': 0,
+        'units': 0,
+      };
+
+      rec['trays'] = (rec['trays'] as int) + trays;
+      rec['units'] = (rec['units'] as int) + units;
       agg[name] = rec;
     }
 
@@ -60,23 +86,29 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
     return list;
   }
 
-  void _gotoBakerStock(List<Map<String, dynamic>> items) {
+  void _gotoBakerStock(List<Map<String, dynamic>> items) async {
     if (items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Bu günde veri yok.')),
       );
       return;
     }
+
+    // ✅ çıkmadan kaydet
+    await _saveSelectedDayToPrefs(_selectedDay);
+
+    if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => BakerStockPage(
           userId: widget.userId,
+          day: _selectedDay,          // <- SEÇTİĞİN GÜN ZORUNLU GÖNDERİLİYOR
           initialItems: items,
-          dayLabel: _selectedDay,
         ),
       ),
     );
+
   }
 
   @override
@@ -86,7 +118,10 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
       return ChoiceChip(
         label: Text(d, style: const TextStyle(fontSize: 12)),
         selected: sel,
-        onSelected: (_) => setState(() => _selectedDay = d),
+        onSelected: (_) async {
+          setState(() => _selectedDay = d);
+          await _saveSelectedDayToPrefs(_selectedDay); // ✅ her seçimde kaydet
+        },
         selectedColor: gold.withOpacity(0.25),
         backgroundColor: const Color(0xFF1A1A1A),
         labelStyle: const TextStyle(color: Colors.white),
@@ -94,7 +129,6 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
       );
     }).toList();
 
-    // Seçili günün canlı sorgusu
     final dayStream = db
         .collection('production')
         .where('date', isEqualTo: _selectedDay)
@@ -105,24 +139,25 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: gold),
-        title: const Text('Gün Seç • Son 3 Gün',
-            style: TextStyle(color: gold, fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Gün Seç • Son 3 Gün',
+          style: TextStyle(color: gold, fontWeight: FontWeight.bold),
+        ),
       ),
 
-      // Gövde: çipler + (canlı özet + canlı liste)
       body: Column(
         children: [
-          // Gün çipleri
+          // gün çipleri
           Container(
             alignment: Alignment.centerLeft,
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
             child: Wrap(spacing: 8, children: chips),
           ),
 
-          // Seçili günün canlı içeriği
+          // canlı içerik
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              key: ValueKey(_selectedDay), // gün değişince stream yenilensin
+              key: ValueKey(_selectedDay),
               stream: dayStream,
               builder: (context, snap) {
                 if (snap.hasError) {
@@ -136,7 +171,8 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
                 }
                 if (!snap.hasData) {
                   return const Center(
-                      child: CircularProgressIndicator(color: gold));
+                    child: CircularProgressIndicator(color: gold),
+                  );
                 }
 
                 final docs = snap.data!.docs;
@@ -192,9 +228,9 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
                         itemBuilder: (_, i) {
                           final m = items[i];
                           final name  = m['productName'] as String;
-                          final trays = m['trays'] as int;
-                          final units = m['units'] as int;
-                          final pt    = m['perTray'] as int;
+                          final trays = (m['trays'] as int?) ?? 0;
+                          final units = (m['units'] as int?) ?? 0;
+                          final pt    = (m['perTray'] as int?) ?? 1;
 
                           return Container(
                             padding: const EdgeInsets.all(12),
@@ -236,14 +272,16 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
         ],
       ),
 
-      // Alt bar: canlı listeye göre buton aktif/pasif
+      // Alt bar
       bottomNavigationBar: SafeArea(
         child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
           key: ValueKey("bottom-$_selectedDay"),
           stream: dayStream,
           builder: (context, snap) {
             final hasData = snap.hasData && snap.data!.docs.isNotEmpty;
-            final items = hasData ? _aggregateDocs(snap.data!.docs) : const <Map<String, dynamic>>[];
+            final items = hasData
+                ? _aggregateDocs(snap.data!.docs)
+                : const <Map<String, dynamic>>[];
 
             return Container(
               padding: const EdgeInsets.all(12),
@@ -266,6 +304,7 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
     );
   }
 
+  // küçük pill
   Widget _pill(String label, String value) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

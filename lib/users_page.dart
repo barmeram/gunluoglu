@@ -6,6 +6,7 @@
 // ✅ Admin: Kullanıcıyı engelle / engeli kaldır (isActive toggle)
 // ✅ Hızlı Menüye: Stok (Gün Seç) eklendi → AdminDailyPickerPage
 // Not: Dışarı Ürünler -> customer_products koleksiyonunu yönetir (ProductManageForCustomerPage)
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -13,7 +14,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 // Sayfalar
 import 'package:gunluogluproje/CompetitionPage.dart'; // Satış Yarışı sayfası
 import 'baker_stock_page.dart';
-import 'package:gunluogluproje/AdminDailyPickerPage.dart' hide BakerStockPage; // 🔹 Eklendi: Gün seçerek stok inceleme
+import 'package:gunluogluproje/AdminDailyPickerPage.dart' hide BakerStockPage; // 🔹 Gün seçerek stok inceleme
 import 'user_revenue_page.dart';
 import 'pos_page.dart';
 import 'all_revenue_page.dart';
@@ -44,6 +45,8 @@ class _UsersPageState extends State<UsersPage> {
   final db = FirebaseFirestore.instance;
   final _scaffoldKey = GlobalKey<ScaffoldState>(); // 🔑 endDrawer açmak için
   String _q = '';
+
+  static const _prefsKeySelectedDay = 'admin_daily_picker_selected_day';
 
   // Admin ise herkesi; değilse sadece kendi kaydını dinle (rules hatasını önler)
   Stream<QuerySnapshot<Map<String, dynamic>>> _usersStream() {
@@ -157,6 +160,23 @@ class _UsersPageState extends State<UsersPage> {
     }
   }
 
+  // ✅ Son seçilen günü (yoksa bugün) okuyup BakerStock’a gider
+  Future<void> _openBakerStockWithLastDay() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_prefsKeySelectedDay);
+    final String day = saved ?? _todayKey();
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BakerStockPage(
+          userId: widget.currentUid,
+          day: day,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     const gold = Color(0xFFFFD700);
@@ -186,7 +206,7 @@ class _UsersPageState extends State<UsersPage> {
         child: SafeArea(
           child: Column(
             children: [
-              // Üst başlık (FIX: Row artık Container'ın child'ı)
+              // Üst başlık
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
                 decoration: const BoxDecoration(
@@ -283,25 +303,19 @@ class _UsersPageState extends State<UsersPage> {
                         );
                       },
                     ),
-                    // 🔸 Stoklar (BUGÜN) → BakerStockPage (bugün)
+
+                    // ✅ Stoklar (Son Seçim) → SharedPreferences'tan gün okuyup BakerStock
                     menuTile(
                       icon: Icons.inventory,
-                      title: 'Stoklar (Bugün)',
-                      subtitle: 'Bugünkü fırın stokları ve ürünler',
+                      title: 'Stoklar (Son Seçim)',
+                      subtitle: 'En son seçtiğin gün (kayıt yoksa bugün)',
                       onTap: () {
                         Navigator.pop(context);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => BakerStockPage(
-                              userId: widget.currentUid,
-                              dayLabel: _todayKey(), // açıkça bugünü veriyoruz
-                            ),
-                          ),
-                        );
+                        _openBakerStockWithLastDay();
                       },
                     ),
-                    // 🔸 STOK (GÜN SEÇ) → AdminDailyPickerPage
+
+                    // 🔸 STOK (Gün Seç) → AdminDailyPickerPage
                     menuTile(
                       icon: Icons.calendar_month_outlined,
                       title: 'Stok (Gün Seç)',
@@ -316,7 +330,8 @@ class _UsersPageState extends State<UsersPage> {
                         );
                       },
                     ),
-                    // ✅ YENİ: Üretimin Ürünü Düzenle (production_manage_page.dart)
+
+                    // ✅ Üretimin Ürünü Düzenle
                     menuTile(
                       icon: Icons.factory_outlined,
                       title: 'Üretimin Ürünü Düzenle',
@@ -331,6 +346,7 @@ class _UsersPageState extends State<UsersPage> {
                         );
                       },
                     ),
+
                     // POS/products ürün yönetimi
                     menuTile(
                       icon: Icons.store_mall_directory,
@@ -346,6 +362,7 @@ class _UsersPageState extends State<UsersPage> {
                         );
                       },
                     ),
+
                     // customer_products ürün yönetimi
                     menuTile(
                       icon: Icons.shopping_bag_outlined,

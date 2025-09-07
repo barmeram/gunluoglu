@@ -1,6 +1,4 @@
-// ==============================
-// FILE: baker_stock_page.dart
-// ==============================
+// baker_stock_page.dart
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,58 +7,23 @@ class BakerStockPage extends StatelessWidget {
   const BakerStockPage({
     super.key,
     required this.userId,
-    this.initialItems, // AdminDailyPicker'dan gelen aggregate özet (opsiyonel)
-    this.dayLabel, // Hangi gün gösterilecek? (opsiyonel, yoksa bugün)
+    required this.day,           // ← ZORUNLU, fallback KALDIRILDI
+    this.initialItems,
   });
 
   final String userId;
+  final String day;
   final List<Map<String, dynamic>>? initialItems;
-  final String? dayLabel;
-
-  // Gün anahtarı
-  String _todayKey() {
-    final now = DateTime.now();
-    return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
-  }
-
-  String _day() => dayLabel ?? _todayKey();
-
-  String _slugify(String s) {
-    const trMap = {
-      'İ': 'I',
-      'I': 'I',
-      'Ş': 'S',
-      'Ğ': 'G',
-      'Ü': 'U',
-      'Ö': 'O',
-      'Ç': 'C',
-      'ı': 'i',
-      'ş': 's',
-      'ğ': 'g',
-      'ü': 'u',
-      'ö': 'o',
-      'ç': 'c',
-    };
-    final replaced = s.trim().split('').map((c) => trMap[c] ?? c).join();
-    final lower = replaced.toLowerCase();
-    final keep = RegExp(r'[a-z0-9]+');
-    final parts = keep.allMatches(lower).map((m) => m.group(0)!).toList();
-    final slug = parts.join('_');
-    return slug.isEmpty ? 'urun_${DateTime.now().millisecondsSinceEpoch}' : slug;
-  }
 
   // --- Stok Sıfırlama: sadece seçili gün ---
   Future<void> _resetDayStocks(BuildContext context) async {
     final db = FirebaseFirestore.instance;
-    final day = _day();
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Stokları Sıfırla'),
-        content: Text(
-          "'$day' gününe ait production kayıtlarının TÜMÜ silinecek. Emin misin?",
-        ),
+        content: Text("'$day' gününe ait production kayıtlarının TÜMÜ silinecek. Emin misin?"),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('İptal')),
           ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Evet, Sıfırla')),
@@ -74,6 +37,8 @@ class BakerStockPage extends StatelessWidget {
       const chunk = 450;
       Query<Map<String, dynamic>> q =
       db.collection('production').where('date', isEqualTo: day).limit(chunk);
+
+      // Silinecek dokümanlar bitene kadar parça parça sil
       while (true) {
         final snap = await q.get();
         if (snap.docs.isEmpty) break;
@@ -85,17 +50,15 @@ class BakerStockPage extends StatelessWidget {
         await batch.commit();
       }
 
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Stoklar sıfırlandı ✅ ($day)")),
-        );
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Stoklar sıfırlandı ✅ ($day)")),
+      );
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sıfırlama hatası: $e')),
-        );
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sıfırlama hatası: $e')),
+      );
     }
   }
 
@@ -103,7 +66,6 @@ class BakerStockPage extends StatelessWidget {
   Widget build(BuildContext context) {
     const gold = Color(0xFFFFD700);
     final db = FirebaseFirestore.instance;
-    final day = _day();
     final s = _scaleFor(context);
 
     return Scaffold(
@@ -111,10 +73,8 @@ class BakerStockPage extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: gold),
-        title: Text(
-          'Stok • $day',
-          style: TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 16 * s),
-        ),
+        title: Text('Stok • $day',
+            style: TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 16 * s)),
         actions: [
           IconButton(
             tooltip: 'Seçili günü sıfırla',
@@ -125,11 +85,11 @@ class BakerStockPage extends StatelessWidget {
       ),
       body: Column(
         children: [
-          // AdminDailyPicker'dan gelen özet varsa göster
+          // AdminDailyPicker’dan gelen özet varsa üst bantta göster
           if (initialItems != null && initialItems!.isNotEmpty)
             _AdminSummaryBanner(initialItems: initialItems!),
 
-          // Canlı stok (seçili gün)
+          // Seçili güne ait canlı stok listesi
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: db
@@ -142,11 +102,9 @@ class BakerStockPage extends StatelessWidget {
                   return Center(
                     child: Padding(
                       padding: EdgeInsets.all(12 * s),
-                      child: Text(
-                        'Hata oluştu: ${snap.error}',
-                        style: TextStyle(color: Colors.red, fontSize: 14 * s),
-                        textAlign: TextAlign.center,
-                      ),
+                      child: Text('Hata oluştu: ${snap.error}',
+                          style: TextStyle(color: Colors.red, fontSize: 14 * s),
+                          textAlign: TextAlign.center),
                     ),
                   );
                 }
@@ -158,7 +116,7 @@ class BakerStockPage extends StatelessWidget {
 
                 final docs = snap.data!.docs;
 
-                // Toplam hesapla
+                // Toplamlar
                 int totalTrays = 0;
                 int totalUnits = 0;
                 for (final d in docs) {
@@ -171,17 +129,14 @@ class BakerStockPage extends StatelessWidget {
                   return Center(
                     child: Padding(
                       padding: EdgeInsets.all(16 * s),
-                      child: Text(
-                        'Kayıt yok',
-                        style: TextStyle(color: gold, fontSize: 16 * s),
-                      ),
+                      child: Text('Kayıt yok', style: TextStyle(color: gold, fontSize: 16 * s)),
                     ),
                   );
                 }
 
                 return Column(
                   children: [
-                    // toplam özet bar
+                    // toplam özet
                     Container(
                       width: double.infinity,
                       margin: EdgeInsets.all(12 * s),
@@ -197,15 +152,12 @@ class BakerStockPage extends StatelessWidget {
                             child: FittedBox(
                               alignment: Alignment.centerLeft,
                               fit: BoxFit.scaleDown,
-                              child: Text(
-                                'Toplam Tava: $totalTrays',
-                                maxLines: 1,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14 * s,
-                                ),
-                              ),
+                              child: Text('Toplam Tava: $totalTrays',
+                                  maxLines: 1,
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14 * s)),
                             ),
                           ),
                           SizedBox(width: 8 * s),
@@ -213,15 +165,12 @@ class BakerStockPage extends StatelessWidget {
                             child: FittedBox(
                               alignment: Alignment.centerRight,
                               fit: BoxFit.scaleDown,
-                              child: Text(
-                                'Toplam Adet: $totalUnits',
-                                maxLines: 1,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14 * s,
-                                ),
-                              ),
+                              child: Text('Toplam Adet: $totalUnits',
+                                  maxLines: 1,
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14 * s)),
                             ),
                           ),
                         ],
@@ -236,7 +185,7 @@ class BakerStockPage extends StatelessWidget {
                         separatorBuilder: (_, __) => SizedBox(height: 10 * s),
                         itemBuilder: (_, i) {
                           final m = docs[i].data();
-                          final name = (m['productName'] ?? '-') as String;
+                          final name = (m['productName'] as String?) ?? '-';
                           final trays = (m['trays'] as num? ?? 0).toInt();
                           final units = (m['units'] as num? ?? 0).toInt();
 
@@ -250,7 +199,6 @@ class BakerStockPage extends StatelessWidget {
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                // Ürün adı (sol) – genişleyebilir
                                 Expanded(
                                   child: Text(
                                     name,
@@ -263,8 +211,6 @@ class BakerStockPage extends StatelessWidget {
                                   ),
                                 ),
                                 SizedBox(width: 8 * s),
-
-                                // Değerler (sağ) – wrap ile taşmadan alt satıra iner
                                 Flexible(
                                   child: Wrap(
                                     alignment: WrapAlignment.end,
@@ -293,6 +239,7 @@ class BakerStockPage extends StatelessWidget {
     );
   }
 
+  // Basit pill
   Widget _pill(BuildContext context, String label, String value) {
     const gold = Color(0xFFFFD700);
     final s = _scaleFor(context);
@@ -306,21 +253,14 @@ class BakerStockPage extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            '$label: ',
-            style: TextStyle(color: Colors.white70, fontSize: 12 * s),
-          ),
-          Text(
-            value,
-            style: TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 14 * s),
-          ),
+          Text('$label: ', style: TextStyle(color: Colors.white70, fontSize: 12 * s)),
+          Text(value, style: TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 14 * s)),
         ],
       ),
     );
   }
 }
 
-/// AdminDailyPicker’dan gelen agregasyonun üstte küçük özeti
 class _AdminSummaryBanner extends StatelessWidget {
   const _AdminSummaryBanner({required this.initialItems});
   final List<Map<String, dynamic>> initialItems;
@@ -332,8 +272,8 @@ class _AdminSummaryBanner extends StatelessWidget {
 
     int tTrays = 0, tUnits = 0;
     for (final m in initialItems) {
-      tTrays += (m['trays'] as int?) ?? 0;
-      tUnits += (m['units'] as int?) ?? 0;
+      tTrays += (m['trays'] as num? ?? 0).toInt();
+      tUnits += (m['units'] as num? ?? 0).toInt();
     }
 
     return Container(
@@ -351,65 +291,64 @@ class _AdminSummaryBanner extends StatelessWidget {
           Text('Admin Özeti',
               style: TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 14 * s)),
           SizedBox(height: 6 * s),
-          Text(
-            'Toplam Tava: $tTrays • Toplam Adet: $tUnits',
-            style: TextStyle(color: Colors.white70, fontSize: 12 * s),
-          ),
+          Text('Toplam Tava: $tTrays • Toplam Adet: $tUnits',
+              style: TextStyle(color: Colors.white70, fontSize: 12 * s)),
         ],
       ),
     );
   }
 }
 
-/// ---------------------------------------------------------------------------
-/// GENEL YARDIMCI (başka sayfalardan da çağırabilirsin)
-/// production.productName eşleşmesine göre `units` değerini güvenli şekilde azaltır.
-/// - Transaction kullanır (yarış durumunda doğru çalışır)
-/// - Negatife düşmez (taban 0)
-/// - Doküman yoksa oluşturur (units 0’dan aşağı düşmez)
-/// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// GENEL YARDIMCI
+// productName’e göre `units` azaltır; istersen `day` vererek o günün kaydını
+// azaltırsın. Transaction kullanır, negatife düşürmez.
+// ---------------------------------------------------------------------------
 Future<void> decrementProductionUnitsByName({
   required String productName,
   required int minusUnits,
+  String? day, // opsiyonel: gün filtresi
 }) async {
   if (minusUnits <= 0) return;
+
   final db = FirebaseFirestore.instance;
   final col = db.collection('production');
 
-  // productName ile doküman bul (yoksa yeni doc referansı)
-  final q = await col.where('productName', isEqualTo: productName).limit(1).get();
-  final ref = q.docs.isNotEmpty ? q.docs.first.reference : col.doc();
+  Query<Map<String, dynamic>> q = col.where('productName', isEqualTo: productName);
+  if (day != null && day.isNotEmpty) {
+    q = q.where('date', isEqualTo: day);
+  }
+  final snap = await q.limit(1).get();
+  final ref = snap.docs.isNotEmpty ? snap.docs.first.reference : col.doc();
 
   await db.runTransaction((tx) async {
-    final snap = await tx.get(ref);
-    final curUnits = (snap.data()?['units'] as num?)?.toInt() ?? 0;
-    final curTrays = (snap.data()?['trays'] as num?)?.toInt() ?? 0;
+    final cur = await tx.get(ref);
+    final curUnits = (cur.data()?['units'] as num?)?.toInt() ?? 0;
+    final curTrays = (cur.data()?['trays'] as num?)?.toInt() ?? 0;
     final newUnits = max(0, curUnits - minusUnits);
 
-    tx.set(
-      ref,
-      {
-        'productName': productName,
-        'units': newUnits,
-        'trays': curTrays,
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
+    final data = <String, dynamic>{
+      'productName': productName,
+      'units': newUnits,
+      'trays': curTrays,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (day != null && day.isNotEmpty) {
+      data['date'] = day;
+    }
+
+    tx.set(ref, data, SetOptions(merge: true));
   });
 }
 
-/// -------------------------
-/// Responsive ölçek yardımcı
-/// -------------------------
+// -------------------------
+// Responsive ölçek yardımcı
+// -------------------------
 double _scaleFor(BuildContext context) {
   final mq = MediaQuery.of(context);
-  // shortestSide: telefonlar için yatay/dikey fark etmeden en güvenli metrik
-  final shortest = mq.size.shortestSide; // dp
-  // 360dp taban kabul (orta boy telefon). 4" civarı ~320dp → ~0.9; 7" civarı daha büyük → >1.0
+  final shortest = mq.size.shortestSide;
   double s = shortest / 360.0;
-  // Aşırı küçülme/büyümeyi sınırlayalım:
-  if (s < 0.85) s = 0.85; // çok küçük ekranlarda bile okunabilir kalsın
-  if (s > 1.35) s = 1.35; // çok büyük telefon/tabletlerde aşırı büyütmeyelim
+  if (s < 0.85) s = 0.85;
+  if (s > 1.35) s = 1.35;
   return s;
 }
