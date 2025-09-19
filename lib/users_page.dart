@@ -7,6 +7,7 @@
 // ✅ Hızlı Menüye: Stok (Gün Seç) eklendi → AdminDailyPickerPage
 // Not: Dışarı Ürünler -> customer_products koleksiyonunu yönetir (ProductManageForCustomerPage)
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:gunluogluproje/CustomerOrdersOverviewPage.dart'; // Müşteri Sipariş Özeti
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -260,6 +261,18 @@ class _UsersPageState extends State<UsersPage> {
                 child: ListView(
                   padding: EdgeInsets.zero,
                   children: [
+                    menuTile(
+                      icon: Icons.people_alt,
+                      title: 'Müşteri Sipariş Özeti',
+                      subtitle: 'Sipariş verenler, nakit/veresiye toplamları',
+                      onTap: () {
+                        Navigator.pop(context); // çekmeceyi kapat
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const CustomerOrdersOverviewPage()),
+                        );
+                      },
+                    ),
                     menuTile(
                       icon: Icons.emoji_events,
                       title: 'Satış Yarışı',

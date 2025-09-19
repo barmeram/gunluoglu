@@ -5,42 +5,65 @@ class ProductManageForCustomerPage extends StatefulWidget {
   const ProductManageForCustomerPage({super.key});
 
   @override
-  State<ProductManageForCustomerPage> createState() => _ProductManageForCustomerPageState();
+  State<ProductManageForCustomerPage> createState() =>
+      _ProductManageForCustomerPageState();
 }
 
-class _ProductManageForCustomerPageState extends State<ProductManageForCustomerPage> {
+class _ProductManageForCustomerPageState
+    extends State<ProductManageForCustomerPage> {
   final db = FirebaseFirestore.instance;
 
   static const gold = Color(0xFFFFD700);
-  static const String kCustomerProducts = 'customer_products'; // yalnızca burası
+  static const String kCustomerProducts = 'customer_products';
 
-  // Basit slug helper: isimden doc id üret
+  // Slug helper
   String _slugify(String s) {
     final trMap = {
-      'İ':'I','I':'I','Ş':'S','Ğ':'G','Ü':'U','Ö':'O','Ç':'C',
-      'ı':'i','ş':'s','ğ':'g','ü':'u','ö':'o','ç':'c',
+      'İ': 'I',
+      'I': 'I',
+      'Ş': 'S',
+      'Ğ': 'G',
+      'Ü': 'U',
+      'Ö': 'O',
+      'Ç': 'C',
+      'ı': 'i',
+      'ş': 's',
+      'ğ': 'g',
+      'ü': 'u',
+      'ö': 'o',
+      'ç': 'c',
     };
-    final replaced = s.trim().split('').map((c) => trMap[c] ?? c).join();
+    final replaced =
+    s.trim().split('').map((c) => trMap[c] ?? c).join();
     final lower = replaced.toLowerCase();
     final keep = RegExp(r'[a-z0-9]+');
-    final parts = keep.allMatches(lower).map((m) => m.group(0)!).toList();
+    final parts =
+    keep.allMatches(lower).map((m) => m.group(0)!).toList();
     final slug = parts.join('_');
-    return slug.isEmpty ? 'urun_${DateTime.now().millisecondsSinceEpoch}' : slug;
+    return slug.isEmpty
+        ? 'urun_${DateTime.now().millisecondsSinceEpoch}'
+        : slug;
   }
 
   // ============================================
-  // Dialog (Ekle / Düzenle) — sadece customer_products
+  // Dialog (Ekle / Düzenle)
   // ============================================
-  Future<void> _openProductDialog({DocumentSnapshot<Map<String, dynamic>>? doc}) async {
+  Future<void> _openProductDialog(
+      {DocumentSnapshot<Map<String, dynamic>>? doc}) async {
     final isEditing = doc != null;
     final data = doc?.data();
 
-    final nameC = TextEditingController(text: (data?['name'] ?? '') as String);
-    final priceC = TextEditingController(text: (data?['price'] as num?)?.toString() ?? '');
-    final pricePerKgC = TextEditingController(text: (data?['pricePerKg'] as num?)?.toString() ?? '');
-    // 🔹 Ortak stok bağlantısı (production.productName ile bire bir)
+    final nameC =
+    TextEditingController(text: (data?['name'] ?? '') as String);
+    final priceC = TextEditingController(
+        text: (data?['price'] as num?)?.toString() ?? '');
+    final pricePerKgC = TextEditingController(
+        text: (data?['pricePerKg'] as num?)?.toString() ?? '');
+    final salePriceC = TextEditingController(
+        text: (data?['salePrice'] as num?)?.toString() ?? '');
     final productionNameC = TextEditingController(
-      text: (data?['productionName'] as String?) ?? (data?['name'] as String? ?? ''),
+      text: (data?['productionName'] as String?) ??
+          (data?['name'] as String? ?? ''),
     );
     bool isWeighted = (data?['isWeighted'] as bool?) ?? false;
 
@@ -56,14 +79,16 @@ class _ProductManageForCustomerPageState extends State<ProductManageForCustomerP
                 borderRadius: BorderRadius.circular(12),
                 side: const BorderSide(color: gold),
               ),
-              title: Text(isEditing ? 'Dışarı Ürün Düzenle' : 'Yeni Ürün', style: const TextStyle(color: gold)),
+              title: Text(
+                  isEditing ? 'Dışarı Ürün Düzenle' : 'Yeni Ürün',
+                  style: const TextStyle(color: gold)),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     TextField(
                       controller: nameC,
-                      enabled: !isEditing, // düzenlemede isim/doküman id sabit kalsın
+                      enabled: !isEditing,
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
                         labelText: 'Ürün adı',
@@ -73,7 +98,6 @@ class _ProductManageForCustomerPageState extends State<ProductManageForCustomerP
                       ),
                     ),
                     const SizedBox(height: 10),
-                    // 🔹 productionName: tek stok kaynağı için (production.productName ile aynı yaz)
                     TextField(
                       controller: productionNameC,
                       style: const TextStyle(color: Colors.white),
@@ -88,13 +112,14 @@ class _ProductManageForCustomerPageState extends State<ProductManageForCustomerP
                     Row(
                       children: [
                         Expanded(
-                          child: Text('Satış Tipi: ${isWeighted ? "Kg" : "Adet"}',
+                          child: Text(
+                              'Satış Tipi: ${isWeighted ? "Kg" : "Adet"}',
                               style: const TextStyle(color: Colors.white70)),
                         ),
                         Switch(
                           value: isWeighted,
                           onChanged: isEditing
-                              ? null // düzenlemede satış tipi değişmesin (fiyatlar karışmasın)
+                              ? null
                               : (v) => setLocal(() => isWeighted = v),
                           activeColor: gold,
                         ),
@@ -104,27 +129,42 @@ class _ProductManageForCustomerPageState extends State<ProductManageForCustomerP
                     if (!isWeighted)
                       TextField(
                         controller: priceC,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
                         style: const TextStyle(color: Colors.white),
                         decoration: const InputDecoration(
-                          labelText: 'Fiyat (adet)',
+                          labelText: 'Alış Fiyatı (adet)',
                           labelStyle: TextStyle(color: Colors.white70),
-                          hintText: 'Örn: 15',
+                          hintText: 'Örn: 22',
                           hintStyle: TextStyle(color: Colors.white38),
                         ),
                       )
                     else
                       TextField(
                         controller: pricePerKgC,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
                         style: const TextStyle(color: Colors.white),
                         decoration: const InputDecoration(
-                          labelText: 'Fiyat / kg',
+                          labelText: 'Alış Fiyatı / kg',
                           labelStyle: TextStyle(color: Colors.white70),
                           hintText: 'Örn: 120',
                           hintStyle: TextStyle(color: Colors.white38),
                         ),
                       ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: salePriceC,
+                      keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText: 'Satış Fiyatı',
+                        labelStyle: TextStyle(color: Colors.white70),
+                        hintText: 'Örn: 25',
+                        hintStyle: TextStyle(color: Colors.white38),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -133,65 +173,75 @@ class _ProductManageForCustomerPageState extends State<ProductManageForCustomerP
                   TextButton(
                     onPressed: () async {
                       try {
-                        await doc!.reference.delete(); // customer_products içinden sil
+                        await doc!.reference.delete();
                         if (context.mounted) Navigator.pop(ctx, true);
                       } catch (e) {
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Silinemedi: $e')));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Silinemedi: $e')));
                         }
                       }
                     },
-                    child: const Text('Sil', style: TextStyle(color: Colors.redAccent)),
+                    child: const Text('Sil',
+                        style: TextStyle(color: Colors.redAccent)),
                   ),
                 TextButton(
                   onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('İptal', style: TextStyle(color: Colors.white70)),
+                  child: const Text('İptal',
+                      style: TextStyle(color: Colors.white70)),
                 ),
                 TextButton(
                   onPressed: () async {
                     final name = nameC.text.trim();
-                    final price = double.tryParse(priceC.text.replaceAll(',', '.'));
-                    final ppk = double.tryParse(pricePerKgC.text.replaceAll(',', '.'));
+                    final price =
+                    double.tryParse(priceC.text.replaceAll(',', '.'));
+                    final ppk = double.tryParse(
+                        pricePerKgC.text.replaceAll(',', '.'));
+                    final salePrice =
+                    double.tryParse(salePriceC.text.replaceAll(',', '.'));
                     final productionName = productionNameC.text.trim().isEmpty
                         ? name
                         : productionNameC.text.trim();
 
-                    // doğrulama
                     if (name.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('İsim boş olamaz')));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('İsim boş olamaz')));
                       return;
                     }
                     if (!isWeighted && (price == null || price <= 0)) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Geçerli bir adet fiyatı girin')),
-                      );
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('Geçerli bir adet alış fiyatı girin')));
                       return;
                     }
                     if (isWeighted && (ppk == null || ppk <= 0)) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Geçerli bir kg fiyatı girin')),
-                      );
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('Geçerli bir kg alış fiyatı girin')));
+                      return;
+                    }
+                    if (salePrice == null || salePrice <= 0) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('Geçerli bir satış fiyatı girin')));
                       return;
                     }
 
                     try {
                       if (isEditing) {
-                        // UPDATE -> mevcut customer_products/{id}
                         await doc!.reference.set({
                           'price': isWeighted ? null : price,
                           'pricePerKg': isWeighted ? ppk : null,
-                          'productionName': productionName, // 🔹 stok eşleşmesi
+                          'salePrice': salePrice,
+                          'productionName': productionName,
                           'updatedAt': FieldValue.serverTimestamp(),
                         }, SetOptions(merge: true));
                       } else {
-                        // CREATE -> customer_products/{slug}
                         final id = _slugify(name);
                         await db.collection(kCustomerProducts).doc(id).set({
                           'name': name,
                           'isWeighted': isWeighted,
                           'price': isWeighted ? null : price,
                           'pricePerKg': isWeighted ? ppk : null,
-                          'productionName': productionName, // 🔹 stok eşleşmesi
+                          'salePrice': salePrice,
+                          'productionName': productionName,
                           'createdAt': FieldValue.serverTimestamp(),
                           'updatedAt': FieldValue.serverTimestamp(),
                         });
@@ -200,11 +250,13 @@ class _ProductManageForCustomerPageState extends State<ProductManageForCustomerP
                       if (context.mounted) Navigator.pop(ctx, true);
                     } catch (e) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Kaydedilemedi: $e')));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Kaydedilemedi: $e')));
                       }
                     }
                   },
-                  child: const Text('Kaydet', style: TextStyle(color: gold)),
+                  child:
+                  const Text('Kaydet', style: TextStyle(color: gold)),
                 ),
               ],
             );
@@ -214,24 +266,25 @@ class _ProductManageForCustomerPageState extends State<ProductManageForCustomerP
     );
 
     if (result == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(isEditing ? 'Güncellendi' : 'Eklendi')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(isEditing ? 'Güncellendi' : 'Eklendi')));
     }
   }
 
   // ============================================
-  // UI — sadece customer_products
+  // UI
   // ============================================
   @override
   Widget build(BuildContext context) {
-    final productsQuery = db.collection(kCustomerProducts).orderBy('name');
+    final productsQuery =
+    db.collection(kCustomerProducts).orderBy('name');
 
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: const Text('Dışarı Ürün Yönetimi (Müşteri)', style: TextStyle(color: gold)),
+        title: const Text('Dışarı Ürün Yönetimi (Müşteri)',
+            style: TextStyle(color: gold)),
         actions: [
           IconButton(
             tooltip: 'Yeni Ürün',
@@ -245,16 +298,19 @@ class _ProductManageForCustomerPageState extends State<ProductManageForCustomerP
         builder: (ctx, snap) {
           if (snap.hasError) {
             return Center(
-              child: Text('Hata: ${snap.error}', style: const TextStyle(color: Colors.redAccent)),
+              child: Text('Hata: ${snap.error}',
+                  style: const TextStyle(color: Colors.redAccent)),
             );
           }
           if (!snap.hasData) {
-            return const Center(child: CircularProgressIndicator(color: gold));
+            return const Center(
+                child: CircularProgressIndicator(color: gold));
           }
 
           final docs = snap.data!.docs;
           if (docs.isEmpty) {
-            return const Center(child: Text('Ürün yok', style: TextStyle(color: gold)));
+            return const Center(
+                child: Text('Ürün yok', style: TextStyle(color: gold)));
           }
 
           return ListView.separated(
@@ -264,14 +320,23 @@ class _ProductManageForCustomerPageState extends State<ProductManageForCustomerP
             itemBuilder: (_, i) {
               final d = docs[i].data();
               final name = (d['name'] ?? '-') as String;
-              final isWeighted = (d['isWeighted'] ?? false) as bool;
-              final price = (d['price'] as num?)?.toDouble();
-              final pricePerKg = (d['pricePerKg'] as num?)?.toDouble();
-              final productionName = (d['productionName'] as String?) ?? '';
+              final salePrice =
+                  (d['salePrice'] as num?)?.toDouble() ?? 0;
+              final buyPrice =
+                  (d['price'] as num?)?.toDouble() ??
+                      (d['pricePerKg'] as num?)?.toDouble() ??
+                      0;
+              final productionName =
+                  (d['productionName'] as String?) ?? '';
 
-              final subtitlePrice = isWeighted
-                  ? '₺${(pricePerKg ?? 0).toStringAsFixed(2)} / kg'
-                  : '₺${(price ?? 0).toStringAsFixed(2)}';
+              final subtitle = [
+                buyPrice > 0
+                    ? 'Alış: ₺${buyPrice.toStringAsFixed(2)}'
+                    : 'Alış: tanımsız',
+                salePrice > 0
+                    ? 'Satış: ₺${salePrice.toStringAsFixed(2)}'
+                    : 'Satış: tanımsız',
+              ].join('   |   ');
 
               return Card(
                 color: Colors.grey[900],
@@ -280,19 +345,25 @@ class _ProductManageForCustomerPageState extends State<ProductManageForCustomerP
                   side: const BorderSide(color: gold),
                 ),
                 child: ListTile(
-                  title: Text(name, style: const TextStyle(color: gold, fontWeight: FontWeight.w600)),
+                  title: Text(name,
+                      style: const TextStyle(
+                          color: gold, fontWeight: FontWeight.w600)),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(subtitlePrice, style: const TextStyle(color: Colors.white70)),
+                      Text(subtitle,
+                          style: const TextStyle(color: Colors.white70)),
                       if (productionName.isNotEmpty)
-                        Text('Stok: $productionName', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                        Text('Stok: $productionName',
+                            style: const TextStyle(
+                                color: Colors.white38, fontSize: 12)),
                     ],
                   ),
                   trailing: IconButton(
                     icon: const Icon(Icons.edit, color: gold),
                     tooltip: 'Düzenle/Sil',
-                    onPressed: () => _openProductDialog(doc: docs[i]),
+                    onPressed: () =>
+                        _openProductDialog(doc: docs[i]),
                   ),
                 ),
               );

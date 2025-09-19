@@ -42,14 +42,9 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
     }
   }
 
-  // ==== Helpers ====
-  String _todayKey() {
-    final now = DateTime.now();
-    return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
-  }
-
+  // ---------- Helpers ----------
   String _slugify(String s) {
-    final trMap = {
+    const trMap = {
       'İ': 'I', 'I': 'I', 'Ş': 'S', 'Ğ': 'G', 'Ü': 'U', 'Ö': 'O', 'Ç': 'C',
       'ı': 'i', 'ş': 's', 'ğ': 'g', 'ü': 'u', 'ö': 'o', 'ç': 'c',
     };
@@ -57,17 +52,17 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
     final lower = replaced.toLowerCase();
     final keep = RegExp(r'[a-z0-9]+');
     final parts = keep.allMatches(lower).map((m) => m.group(0)!).toList();
-    final slug = parts.join('_');
+    final slug = parts.join('_').replaceAll(RegExp(r'_+'), '_');
     return slug.isEmpty ? 'urun_${DateTime.now().millisecondsSinceEpoch}' : slug;
   }
 
-  // ==== Dialog (Ekle/Düzenle) ====
+  // ---------- Dialog (Ekle / Düzenle) ----------
   Future<void> _openEditDialog({DocumentSnapshot<Map<String, dynamic>>? doc}) async {
     final isEditing = doc != null;
     final data = doc?.data();
 
     final nameC    = TextEditingController(text: (data?['productName'] ?? '') as String);
-    final perTrayC = TextEditingController(text: ((data?['perTray'] as num?)?.toInt() ?? 11).toString());
+    final perTrayC = TextEditingController(text: ((data?['perTray'] as num?)?.toInt() ?? 12).toString());
     final traysC   = TextEditingController(text: ((data?['trays']   as num?)?.toInt() ?? 0).toString());
     final unitsC   = TextEditingController(text: ((data?['units']   as num?)?.toInt() ?? 0).toString());
 
@@ -80,7 +75,6 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
       final perTray = max(0, _toInt(perTrayC, def: 0));
       final trays   = max(0, _toInt(traysC, def: 0));
       unitsC.text   = (perTray * trays).toString();
-      // StatefulBuilder içindeki setLocal zaten UI’ı tazeliyor; ekstra setState gerekmez.
     }
 
     final result = await showDialog<bool>(
@@ -98,7 +92,7 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
                 side: const BorderSide(color: gold),
               ),
               title: Text(
-                isEditing ? 'Üretim Kaydı Düzenle' : 'Yeni Üretim Kaydı',
+                isEditing ? 'Ürünü Düzenle' : 'Yeni Ürün',
                 style: const TextStyle(color: gold, fontWeight: FontWeight.bold),
               ),
               content: SingleChildScrollView(
@@ -108,12 +102,12 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
                     // productName
                     TextField(
                       controller: nameC,
-                      enabled: !isEditing, // doc id sabit kalsın
+                      enabled: !isEditing, // doc id = slug sabit kalsın, rename ayrı iş
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
-                        labelText: 'Ürün Adı (productionName)',
+                        labelText: 'Ürün Adı',
                         labelStyle: TextStyle(color: Colors.white70),
-                        hintText: 'Örn: Kaşarlı Börek',
+                        hintText: 'Örn: Simit',
                         hintStyle: TextStyle(color: Colors.white38),
                       ),
                     ),
@@ -128,7 +122,7 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
                       decoration: const InputDecoration(
                         labelText: '1 tava = kaç adet? (perTray)',
                         labelStyle: TextStyle(color: Colors.white70),
-                        hintText: 'Örn: 11 / 12 / 8 / 38',
+                        hintText: 'Örn: 12',
                         hintStyle: TextStyle(color: Colors.white38),
                       ),
                     ),
@@ -146,7 +140,7 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
                             decoration: const InputDecoration(
                               labelText: 'Tava (trays)',
                               labelStyle: TextStyle(color: Colors.white70),
-                              hintText: 'Örn: 2',
+                              hintText: 'Örn: 3',
                               hintStyle: TextStyle(color: Colors.white38),
                             ),
                           ),
@@ -161,7 +155,7 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
                             decoration: const InputDecoration(
                               labelText: 'Adet (units)',
                               labelStyle: TextStyle(color: Colors.white70),
-                              hintText: 'Örn: 22',
+                              hintText: 'Örn: 36',
                               hintStyle: TextStyle(color: Colors.white38),
                             ),
                           ),
@@ -226,7 +220,7 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
                     }
                     if (perTray <= 0) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('perTray (1 tava kaç adet) 1 veya daha büyük olmalı')),
+                        const SnackBar(content: Text('perTray 1 veya daha büyük olmalı')),
                       );
                       return;
                     }
@@ -235,6 +229,7 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
 
                     try {
                       if (isEditing) {
+                        // Var olan kalıcı dokümanı güncelle
                         await doc!.reference.set({
                           'perTray': perTray,
                           'trays': trays,
@@ -242,21 +237,33 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
                           'updatedAt': FieldValue.serverTimestamp(),
                         }, SetOptions(merge: true));
                       } else {
-                        final today = _todayKey();
-                        final slug  = _slugify(name);
-                        final id    = "${today}__${slug}"; // BakerTava ile UYUMLU
+                        // Yeni ürün: doc id = slug (GÜNLÜK DEĞİL)
+                        final slug = _slugify(name);
+                        final ref  = db.collection('production').doc(slug);
+                        final exists = (await ref.get()).exists;
 
-                        await db.collection('production').doc(id).set({
-                          'date': today,
-                          'productName': name,
-                          'productSlug': slug, // eşleştirme için güvenli anahtar
-                          'perTray': perTray,
-                          'trays': trays,
-                          'units': max(0, finalUnits),
-                          'createdAt': FieldValue.serverTimestamp(),
-                          'updatedAt': FieldValue.serverTimestamp(),
-                          'createdBy': auth.currentUser?.uid,
-                        });
+                        if (!exists) {
+                          await ref.set({
+                            'productName': name,
+                            'productSlug': slug,
+                            'perTray': perTray,
+                            'trays': trays,
+                            'units': max(0, finalUnits),
+                            'createdAt': FieldValue.serverTimestamp(),
+                            'updatedAt': FieldValue.serverTimestamp(),
+                            'createdBy': auth.currentUser?.uid,
+                          });
+                        } else {
+                          // Varsa üzerine güncelle (createdAt’i bozma)
+                          await ref.set({
+                            'productName': name,
+                            'productSlug': slug,
+                            'perTray': perTray,
+                            'trays': trays,
+                            'units': max(0, finalUnits),
+                            'updatedAt': FieldValue.serverTimestamp(),
+                          }, SetOptions(merge: true));
+                        }
                       }
                       if (context.mounted) Navigator.pop(ctx, true);
                     } catch (e) {
@@ -283,14 +290,12 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
     }
   }
 
+  // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
-    final today = _todayKey();
-    // Not: where('date', == today) + orderBy('productName') için composite index gerekebilir (konsol linkini izleyip oluştur).
     final q = db
         .collection('production')
-        .where('date', isEqualTo: today)
-        .orderBy('productName');
+        .orderBy('productName'); // günlük filtre YOK → kalıcı liste
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -301,7 +306,7 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
         actions: [
           if (_isAdmin || _isProducer)
             IconButton(
-              tooltip: 'Yeni Üretim Kaydı',
+              tooltip: 'Yeni Ürün',
               onPressed: () => _openEditDialog(),
               icon: const Icon(Icons.add_box, color: gold),
             ),
@@ -332,11 +337,11 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
           final docs = snap.data!.docs;
           if (docs.isEmpty) {
             return const Center(
-              child: Text('Bugün için üretim kaydı yok', style: TextStyle(color: gold)),
+              child: Text('Henüz ürün eklenmemiş', style: TextStyle(color: gold)),
             );
           }
 
-          // Toplam
+          // Toplamlar
           int totalTrays = 0;
           int totalUnits = 0;
           for (final d in docs) {
@@ -419,12 +424,13 @@ class _ProductionManagePageState extends State<ProductionManagePage> {
                               ],
                             ),
                           ),
-                          // Sağ: Edit
-                          IconButton(
-                            tooltip: 'Düzenle',
-                            icon: const Icon(Icons.edit, color: gold),
-                            onPressed: () => _openEditDialog(doc: docs[i]),
-                          ),
+                          // Sağ: Edit (sadece yetkililer)
+                          if (_isAdmin || _isProducer)
+                            IconButton(
+                              tooltip: 'Düzenle',
+                              icon: const Icon(Icons.edit, color: gold),
+                              onPressed: () => _openEditDialog(doc: docs[i]),
+                            ),
                         ],
                       ),
                     );

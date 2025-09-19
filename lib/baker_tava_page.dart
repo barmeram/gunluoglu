@@ -22,12 +22,12 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
   bool _hasAccess = false; // only producer || admin
   String? _roleText;
 
-  // --- Geçici seçimler (UI alt bar) ---
+  // --- Geçici seçimler (alt bar) ---
   final Map<String, int> _pendingTrays = {}; // productName -> delta trays
   final Map<String, int> _pendingUnits = {}; // productName -> delta units
   bool _saving = false;
 
-  // --- Canlı katalog metası (son snapshot’tan) ---
+  // --- Katalog metası (sabit ürünlerden) ---
   // productName -> meta (ref, perTray, slug)
   Map<String, _ProdMeta> _metaByName = {};
 
@@ -81,7 +81,8 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
     return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
   }
 
-  String _slugify(String s) {
+  // Kataloğun slug'ı yoksa güvenli fallback
+  String _slugifyFallback(String s) {
     const trMap = {
       'İ': 'I', 'I': 'I', 'Ş': 'S', 'Ğ': 'G', 'Ü': 'U', 'Ö': 'O', 'Ç': 'C',
       'ı': 'i', 'ş': 's', 'ğ': 'g', 'ü': 'u', 'ö': 'o', 'ç': 'c',
@@ -146,7 +147,7 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
     });
   }
 
-  // ---- Firestore yaz (increment) ----
+  // ---- Firestore yaz (GÜNLÜK kayıtlar → production_daily) ----
   Future<void> _commitToFirestore() async {
     if (!_hasAccess) {
       if (!mounted) return;
@@ -180,8 +181,12 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
 
       final meta = _metaByName[name];
       final perTray = meta?.perTray ?? 1;
-      final slug = meta?.productSlug ?? _slugify(name);
-      final ref = meta?.ref ?? db.collection('production').doc("${today}__${slug}");
+      final slug = (meta?.productSlug?.isNotEmpty ?? false)
+          ? meta!.productSlug
+          : _slugifyFallback(name);
+
+      // 🔑 Günlük kayıt ayrı koleksiyona gider
+      final ref = db.collection('production_daily').doc("${today}__${slug}");
 
       batch.set(
         ref,
@@ -203,7 +208,7 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
       await batch.commit();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Veriler eklendi (birikti) ✅')),
+        const SnackBar(content: Text('Günlük veriler kaydedildi ✅')),
       );
       _clearAll();
     } on FirebaseException catch (e) {
@@ -214,7 +219,7 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Bilinmeyen hata: $e')),
+        SnackBar(content: Text('Kaydetme hatası: $e')),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -224,12 +229,9 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
   @override
   Widget build(BuildContext context) {
     const gold = Color(0xFFFFD700);
-    final today = _todayKey();
 
-    final q = db
-        .collection('production')
-        .where('date', isEqualTo: today)
-        .orderBy('productName');
+    // 🔑 Ürünleri sabit KATALOĞUN kendisinden çekiyoruz (tarih filtresi yok)
+    final q = db.collection('production').orderBy('productName');
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -251,16 +253,6 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
             icon: const Icon(Icons.refresh, color: gold),
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(28),
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text(
-              today,
-              style: const TextStyle(color: gold, fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ),
       ),
       body: _loadingRole
           ? const Center(child: CircularProgressIndicator(color: gold))
@@ -271,10 +263,7 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
         builder: (ctx, snap) {
           if (snap.hasError) {
             return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('Hata: ${snap.error}', style: const TextStyle(color: Colors.redAccent)),
-              ),
+              child: Text('Hata: ${snap.error}', style: const TextStyle(color: Colors.redAccent)),
             );
           }
           if (!snap.hasData) {
@@ -283,14 +272,14 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
 
           final docs = snap.data!.docs;
 
-          // Katalog metasını güncelle (build içinde setState’siz, sadece referansı değiştiriyoruz)
           final newMeta = <String, _ProdMeta>{};
           for (final d in docs) {
             final m = d.data();
             final name = (m['productName'] as String?)?.trim() ?? '';
             if (name.isEmpty) continue;
             final perTray = ((m['perTray'] as num?) ?? 1).toInt();
-            final slug = (m['productSlug'] as String?) ?? _slugify(name);
+            final slugRaw = (m['productSlug'] as String?)?.trim() ?? '';
+            final slug = slugRaw.isEmpty ? _slugifyFallback(name) : slugRaw;
             newMeta[name] = _ProdMeta(
               productName: name,
               productSlug: slug,
@@ -305,7 +294,7 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: Text(
-                  'Bugün için üretim listesi yok.\nÖnce Üretim Yönetimi sayfasından ürün ekleyin.',
+                  'Henüz ürün yok. ProductionManagePage’den ekleyin.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Color(0xFFFFD700)),
                 ),
@@ -313,7 +302,6 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
             );
           }
 
-          // Liste
           final all = _metaByName.values.toList()
             ..sort((a, b) => a.productName.compareTo(b.productName));
 
@@ -345,81 +333,35 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
           ? null
           : SafeArea(
         child: Container(
-          decoration: BoxDecoration(
-            color: Colors.grey[900],
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.4),
-                blurRadius: 8,
-                offset: const Offset(0, -2),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          color: Colors.grey[900],
+          padding: const EdgeInsets.all(12),
+          child: Row(
             children: [
-              SizedBox(
-                height: 64,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: <String>{..._pendingTrays.keys, ..._pendingUnits.keys}.map((name) {
-                    final t = _pendingTrays[name] ?? 0;
-                    final u = _pendingUnits[name] ?? 0;
-                    return Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Color(0xFFFFD700)),
-                        borderRadius: BorderRadius.circular(10),
-                        color: Colors.black,
-                      ),
-                      child: Row(
-                        children: [
-                          Text("$name • $t tava • $u adet", style: const TextStyle(color: Colors.white)),
-                          const SizedBox(width: 8),
-                          InkWell(
-                            onTap: () => _setPending(name, 0, 0),
-                            child: const Icon(Icons.close, size: 18, color: Colors.white70),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
+              Expanded(
+                child: Text(
+                  "Toplam: $_totalTrays tava • $_totalUnits adet",
+                  style: const TextStyle(color: gold, fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      "Toplam: $_totalTrays tava • $_totalUnits adet",
-                      style: const TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _saving ? null : _clearAll,
-                    child: const Text("Temizle", style: TextStyle(color: Colors.white70)),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFFD700),
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    onPressed: _saving ? null : _commitToFirestore,
-                    icon: _saving
-                        ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
-                    )
-                        : const Icon(Icons.check),
-                    label: Text(_saving ? "Kaydediliyor..." : "Onayla"),
-                  ),
-                ],
+              TextButton(
+                onPressed: _saving ? null : _clearAll,
+                child: const Text("Temizle", style: TextStyle(color: Colors.white70)),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: gold,
+                  foregroundColor: Colors.black,
+                ),
+                onPressed: _saving ? null : _commitToFirestore,
+                icon: _saving
+                    ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                )
+                    : const Icon(Icons.check),
+                label: Text(_saving ? "Kaydediliyor..." : "Onayla"),
               ),
             ],
           ),
@@ -490,10 +432,7 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
                   const SizedBox(width: 6),
                   _roundBtn(icon: Icons.add, onTap: onUnitPlus),
                   const SizedBox(width: 10),
-                  InkWell(
-                    onTap: onClear,
-                    child: const Icon(Icons.delete_outline, color: Colors.white70, size: 20),
-                  ),
+                  InkWell(onTap: onClear, child: const Icon(Icons.delete_outline, color: Colors.white70)),
                 ],
               ),
             ),
@@ -516,7 +455,6 @@ class _BakerTavaPageState extends State<BakerTavaPage> {
         splashRadius: 18,
         iconSize: 18,
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
       ),
     );
   }
@@ -554,12 +492,6 @@ class _LockedView extends StatelessWidget {
               "Bu sayfayı sadece 'producer' rolündeki kullanıcılar (ve admin) kullanabilir.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70),
-            ),
-            SizedBox(height: 6),
-            Text(
-              "Lütfen producer veya admin hesabıyla giriş yapın.",
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white38),
             ),
           ],
         ),
