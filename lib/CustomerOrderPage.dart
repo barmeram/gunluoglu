@@ -18,7 +18,7 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
   static const gold = Color(0xFFFFD700);
   static const String kCustomerProducts = 'customer_products';
 
-  /// Sepet: productId -> { name, qty, price }
+  /// Sepet: productId -> { name, qty, price }  // price = ALIŞ birim fiyatı
   final Map<String, Map<String, dynamic>> cart = {};
   bool _saving = false;
 
@@ -34,16 +34,16 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
   num _cartTotal() {
     num t = 0;
     for (final it in cart.values) {
-      t += (it['qty'] as num? ?? 0) * (it['price'] as num? ?? 0);
+      t += (it['qty'] as num? ?? 0) * (it['price'] as num? ?? 0); // ALIŞ fiyatıyla hesap
     }
     return t;
   }
 
-  void _addOne(String id, String name, num price) {
+  void _addOne(String id, String name, num buyPrice) {
     setState(() {
       final cur = cart[id];
       if (cur == null) {
-        cart[id] = {'name': name, 'qty': 1, 'price': price};
+        cart[id] = {'name': name, 'qty': 1, 'price': buyPrice};
       } else {
         cart[id]!['qty'] = (cur['qty'] as int) + 1;
       }
@@ -70,13 +70,13 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
         'productId': e.key,
         'name': v['name'],
         'qty': v['qty'],
-        'unitPrice': v['price'],
+        'unitPrice': v['price'], // ALIŞ fiyatı
         'lineTotal': (v['qty'] as num) * (v['price'] as num),
       };
     }).toList();
   }
 
-  /// Kullanıcı adı (users/{uid} -> name/fullName/displayName), yoksa sağlam fallback
+  /// Ad soyad çözümleme
   Future<String> _resolveCurrentUserName() async {
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
@@ -123,6 +123,73 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
   }
 
   // =========================
+  // Adet girme diyaloğu (orta sayıya tıklanınca)
+  // =========================
+  Future<void> _promptQuantity({
+    required String id,
+    required String name,
+    required num unitBuyPrice,
+    required int currentQty,
+  }) async {
+    final c = TextEditingController(text: currentQty > 0 ? '$currentQty' : '');
+    final result = await showDialog<int>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: Colors.black,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: gold),
+          ),
+          title: const Text('Adet Gir', style: TextStyle(color: gold)),
+          content: TextField(
+            controller: c,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(signed: false, decimal: false),
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              labelText: 'Adet',
+              labelStyle: TextStyle(color: Colors.white70),
+              hintText: 'Örn: 12',
+              hintStyle: TextStyle(color: Colors.white38),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('İptal', style: TextStyle(color: Colors.white70)),
+            ),
+            TextButton(
+              onPressed: () {
+                final v = int.tryParse(c.text.trim());
+                // 0 veya boş → kaldır; negatif/null → yok say
+                if (v == null || v < 0) {
+                  Navigator.pop(ctx, null);
+                } else {
+                  Navigator.pop(ctx, v);
+                }
+              },
+              child: const Text('Tamam', style: TextStyle(color: gold)),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (result == null) return;
+
+    setState(() {
+      if (result == 0) {
+        cart.remove(id);
+      } else {
+        cart[id] = {'name': name, 'qty': result, 'price': unitBuyPrice};
+      }
+    });
+  }
+
+  // =========================
   // Siparişi Kaydet → customer_orders.add(...)
   // =========================
 
@@ -144,7 +211,7 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
         "userId": FirebaseAuth.instance.currentUser!.uid,
         "userName": userName,
         "createdAt": FieldValue.serverTimestamp(),
-        "totalPrice": total,
+        "totalPrice": total, // ALIŞ toplamı
         "status": "pending",
         "items": _cartToItemsArray(),
       });
@@ -187,7 +254,6 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         title: const Text('Sipariş Ver (Müşteri)', style: TextStyle(color: gold)),
-        // ❌ Ürün ekle/düzenle/seed butonları yok — bu sayfa read-only ürün listeler
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(32),
           child: StreamBuilder<num>(
@@ -197,7 +263,7 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
-                  'Bugünkü Sipariş Toplamım: ₺$v',
+                  'Bugünkü Sipariş Toplamım (alış): ₺$v',
                   style: const TextStyle(
                     color: gold,
                     fontWeight: FontWeight.w600,
@@ -217,7 +283,8 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
               builder: (ctx, snap) {
                 if (snap.hasError) {
                   return Center(
-                    child: Text('Hata: ${snap.error}', style: const TextStyle(color: Colors.redAccent)),
+                    child: Text('Hata: ${snap.error}',
+                        style: const TextStyle(color: Colors.redAccent)),
                   );
                 }
                 if (!snap.hasData) {
@@ -225,7 +292,10 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
                 }
 
                 // Şimdilik sadece adetlik ürünler (isWeighted == false)
-                final docs = snap.data!.docs.where((d) => (d['isWeighted'] ?? false) == false).toList();
+                final docs = snap.data!.docs
+                    .where((d) => (d['isWeighted'] ?? false) == false)
+                    .toList();
+
                 if (docs.isEmpty) {
                   return const Center(
                     child: Text('Ürün yok', style: TextStyle(color: gold)),
@@ -234,21 +304,38 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
 
                 return ListView.separated(
                   padding: const EdgeInsets.symmetric(vertical: 8),
-                  separatorBuilder: (_, __) => const Divider(color: Colors.white12, height: 1),
+                  separatorBuilder: (_, __) =>
+                  const Divider(color: Colors.white12, height: 1),
                   itemCount: docs.length,
                   itemBuilder: (_, i) {
                     final p = docs[i];
                     final data = p.data();
+
                     final String name = (data['name'] as String?)?.trim().isNotEmpty == true
                         ? (data['name'] as String).trim()
                         : '-';
-                    final num price = (data['price'] as num?) ?? 0;
 
-                    // Fiyat yok/<=0 ise bilgilendir
-                    if (price <= 0) {
+                    // Alış (adet) ve satış (bilgi amaçlı) fiyatları
+                    final num buy = (data['price'] as num?) ?? 0;              // ALIŞ → hesaplamada kullanılan
+                    final num? sale = (data['salePrice'] as num?);             // SATIŞ → bilgi amaçlı
+
+                    // Alış yoksa sepete ekleme kapalı
+                    if (buy <= 0) {
                       return ListTile(
                         title: Text(name, style: const TextStyle(color: gold)),
-                        subtitle: const Text('Fiyat tanımsız', style: TextStyle(color: Colors.orangeAccent)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Alış: tanımsız',
+                                style: TextStyle(color: Colors.orangeAccent)),
+                            Text(
+                              sale != null && sale > 0
+                                  ? 'Satış: ₺${sale.toStringAsFixed(2)}'
+                                  : 'Satış: tanımsız',
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          ],
+                        ),
                       );
                     }
 
@@ -257,7 +344,19 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
 
                     return ListTile(
                       title: Text(name, style: const TextStyle(color: gold)),
-                      subtitle: Text('₺${price.toStringAsFixed(2)}', style: const TextStyle(color: gold)),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Alış (hesap): ₺${buy.toStringAsFixed(2)}',
+                              style: const TextStyle(color: gold, fontWeight: FontWeight.w600)),
+                          Text(
+                            sale != null && sale > 0
+                                ? 'Satış (bilgi): ₺${sale.toStringAsFixed(2)}'
+                                : 'Satış (bilgi): tanımsız',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        ],
+                      ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -266,18 +365,33 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
                             icon: const Icon(Icons.remove, color: Colors.redAccent),
                             onPressed: () => _removeOne(p.id),
                           ),
-                          Container(
-                            width: 42,
-                            alignment: Alignment.center,
-                            child: Text(
-                              qty > 0 ? '$qty' : '',
-                              style: const TextStyle(color: Colors.white),
+                          // Orta alan: tıklanınca adet gir (klavye aç)
+                          InkWell(
+                            onTap: () => _promptQuantity(
+                              id: p.id,
+                              name: name,
+                              unitBuyPrice: buy,
+                              currentQty: qty,
+                            ),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              width: 46,
+                              height: 36,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                border: Border.all(color: gold),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                qty > 0 ? '$qty' : '0',
+                                style: const TextStyle(color: Colors.white),
+                              ),
                             ),
                           ),
                           IconButton(
                             tooltip: '1 artır',
                             icon: const Icon(Icons.add, color: Colors.greenAccent),
-                            onPressed: () => _addOne(p.id, name, price),
+                            onPressed: () => _addOne(p.id, name, buy),
                           ),
                         ],
                       ),
@@ -327,7 +441,7 @@ class _CustomerOrderPageState extends State<CustomerOrderPage> {
                     children: [
                       Expanded(
                         child: Text(
-                          'Toplam: ₺${_cartTotal().toStringAsFixed(2)}',
+                          'Toplam (alış): ₺${_cartTotal().toStringAsFixed(2)}',
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,

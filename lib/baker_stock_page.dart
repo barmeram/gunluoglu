@@ -1,4 +1,6 @@
-// baker_stock_page.dart
+// ===========================
+// FILE: baker_stock_page.dart
+// ===========================
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,23 +9,33 @@ class BakerStockPage extends StatelessWidget {
   const BakerStockPage({
     super.key,
     required this.userId,
-    required this.day,           // ← ZORUNLU, fallback KALDIRILDI
+    required this.day,           // ← AdminDailyPicker'dan zorunlu geliyor
     this.initialItems,
   });
 
   final String userId;
-  final String day;
+  final String day; // "YYYY-MM-DD" beklenir
   final List<Map<String, dynamic>>? initialItems;
 
-  // --- Stok Sıfırlama: sadece seçili gün ---
+  // --- Güvenlik: tarih anahtarı geçerli mi? ---
+  bool get _isValidDay => _isValidDateKey(day);
+
+  // --- Stok Sıfırlama: sadece SEÇİLİ gün, production_daily üzerinde ---
   Future<void> _resetDayStocks(BuildContext context) async {
+    if (!_isValidDay) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Geçersiz gün formatı. Sıfırlama iptal.')),
+      );
+      return;
+    }
+
     final db = FirebaseFirestore.instance;
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Stokları Sıfırla'),
-        content: Text("'$day' gününe ait production kayıtlarının TÜMÜ silinecek. Emin misin?"),
+        content: Text("'$day' gününe ait production_daily kayıtlarının TÜMÜ silinecek. Emin misin?"),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('İptal')),
           ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Evet, Sıfırla')),
@@ -34,11 +46,13 @@ class BakerStockPage extends StatelessWidget {
     if (confirm != true) return;
 
     try {
+      // Çok belge varsa parça parça sil
       const chunk = 450;
-      Query<Map<String, dynamic>> q =
-      db.collection('production').where('date', isEqualTo: day).limit(chunk);
+      Query<Map<String, dynamic>> q = db
+          .collection('production_daily')
+          .where('date', isEqualTo: day)
+          .limit(chunk);
 
-      // Silinecek dokümanlar bitene kadar parça parça sil
       while (true) {
         final snap = await q.get();
         if (snap.docs.isEmpty) break;
@@ -68,6 +82,15 @@ class BakerStockPage extends StatelessWidget {
     final db = FirebaseFirestore.instance;
     final s = _scaleFor(context);
 
+    // Seçili güne ait CANLI stok listesi (production_daily)
+    final Stream<QuerySnapshot<Map<String, dynamic>>>? dayStream = _isValidDay
+        ? db
+        .collection('production_daily')
+        .where('date', isEqualTo: day)
+        .orderBy('productName')
+        .snapshots()
+        : null;
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -89,151 +112,167 @@ class BakerStockPage extends StatelessWidget {
           if (initialItems != null && initialItems!.isNotEmpty)
             _AdminSummaryBanner(initialItems: initialItems!),
 
-          // Seçili güne ait canlı stok listesi
-          Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: db
-                  .collection('production')
-                  .where('date', isEqualTo: day)
-                  .orderBy('productName')
-                  .snapshots(),
-              builder: (ctx, snap) {
-                if (snap.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(12 * s),
-                      child: Text('Hata oluştu: ${snap.error}',
-                          style: TextStyle(color: Colors.red, fontSize: 14 * s),
-                          textAlign: TextAlign.center),
-                    ),
-                  );
-                }
-                if (!snap.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(color: Color(0xFFFFD700)),
-                  );
-                }
+          // Tarih formatı bozuksa hemen uyar
+          if (!_isValidDay)
+            Container(
+              width: double.infinity,
+              margin: EdgeInsets.fromLTRB(12 * s, 12 * s, 12 * s, 0),
+              padding: EdgeInsets.all(12 * s),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                border: Border.all(color: Colors.redAccent),
+                borderRadius: BorderRadius.circular(10 * s),
+              ),
+              child: const Text(
+                "Gün formatı hatalı. Beklenen örnek: 2025-01-17",
+                style: TextStyle(color: Colors.redAccent),
+              ),
+            ),
 
-                final docs = snap.data!.docs;
-
-                // Toplamlar
-                int totalTrays = 0;
-                int totalUnits = 0;
-                for (final d in docs) {
-                  final m = d.data();
-                  totalTrays += (m['trays'] as num? ?? 0).toInt();
-                  totalUnits += (m['units'] as num? ?? 0).toInt();
-                }
-
-                if (docs.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(16 * s),
-                      child: Text('Kayıt yok', style: TextStyle(color: gold, fontSize: 16 * s)),
-                    ),
-                  );
-                }
-
-                return Column(
-                  children: [
-                    // toplam özet
-                    Container(
-                      width: double.infinity,
-                      margin: EdgeInsets.all(12 * s),
-                      padding: EdgeInsets.all(12 * s),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[900],
-                        borderRadius: BorderRadius.circular(10 * s),
-                        border: Border.all(color: gold, width: 1),
+          // Seçili güne ait CANLI stok listesi (production_daily)
+          if (_isValidDay)
+            Expanded(
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                // Key: gün değişirse StreamBuilder komple yenilensin
+                key: ValueKey<String>('stock-$day'),
+                stream: dayStream,
+                builder: (ctx, snap) {
+                  if (snap.hasError) {
+                    return Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(12 * s),
+                        child: Text('Hata oluştu: ${snap.error}',
+                            style: TextStyle(color: Colors.red, fontSize: 14 * s),
+                            textAlign: TextAlign.center),
                       ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: FittedBox(
-                              alignment: Alignment.centerLeft,
-                              fit: BoxFit.scaleDown,
-                              child: Text('Toplam Tava: $totalTrays',
-                                  maxLines: 1,
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14 * s)),
-                            ),
-                          ),
-                          SizedBox(width: 8 * s),
-                          Expanded(
-                            child: FittedBox(
-                              alignment: Alignment.centerRight,
-                              fit: BoxFit.scaleDown,
-                              child: Text('Toplam Adet: $totalUnits',
-                                  maxLines: 1,
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14 * s)),
-                            ),
-                          ),
-                        ],
+                    );
+                  }
+                  if (!snap.hasData) {
+                    return const Center(
+                      child: CircularProgressIndicator(color: Color(0xFFFFD700)),
+                    );
+                  }
+
+                  final docs = snap.data!.docs;
+
+                  // Toplamlar
+                  int totalTrays = 0;
+                  int totalUnits = 0;
+                  for (final d in docs) {
+                    final m = d.data();
+                    totalTrays += (m['trays'] as num? ?? 0).toInt();
+                    totalUnits += (m['units'] as num? ?? 0).toInt();
+                  }
+
+                  if (docs.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16 * s),
+                        child: Text('Kayıt yok', style: TextStyle(color: gold, fontSize: 16 * s)),
                       ),
-                    ),
+                    );
+                  }
 
-                    // ürün listesi
-                    Expanded(
-                      child: ListView.separated(
-                        padding: EdgeInsets.fromLTRB(12 * s, 6 * s, 12 * s, 12 * s),
-                        itemCount: docs.length,
-                        separatorBuilder: (_, __) => SizedBox(height: 10 * s),
-                        itemBuilder: (_, i) {
-                          final m = docs[i].data();
-                          final name = (m['productName'] as String?) ?? '-';
-                          final trays = (m['trays'] as num? ?? 0).toInt();
-                          final units = (m['units'] as num? ?? 0).toInt();
-
-                          return Container(
-                            padding: EdgeInsets.all(12 * s),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[900],
-                              borderRadius: BorderRadius.circular(12 * s),
-                              border: Border.all(color: gold, width: 1),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    name,
-                                    overflow: TextOverflow.ellipsis,
+                  return Column(
+                    children: [
+                      // toplam özet
+                      Container(
+                        width: double.infinity,
+                        margin: EdgeInsets.all(12 * s),
+                        padding: EdgeInsets.all(12 * s),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[900],
+                          borderRadius: BorderRadius.circular(10 * s),
+                          border: Border.all(color: gold, width: 1),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: FittedBox(
+                                alignment: Alignment.centerLeft,
+                                fit: BoxFit.scaleDown,
+                                child: Text('Toplam Tava: $totalTrays',
+                                    maxLines: 1,
                                     style: TextStyle(
-                                      color: gold,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14 * s,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14 * s)),
+                              ),
+                            ),
+                            SizedBox(width: 8 * s),
+                            Expanded(
+                              child: FittedBox(
+                                alignment: Alignment.centerRight,
+                                fit: BoxFit.scaleDown,
+                                child: Text('Toplam Adet: $totalUnits',
+                                    maxLines: 1,
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14 * s)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // ürün listesi
+                      Expanded(
+                        child: ListView.separated(
+                          padding: EdgeInsets.fromLTRB(12 * s, 6 * s, 12 * s, 12 * s),
+                          itemCount: docs.length,
+                          separatorBuilder: (_, __) => SizedBox(height: 10 * s),
+                          itemBuilder: (_, i) {
+                            final m = docs[i].data();
+                            final name = (m['productName'] as String?) ?? '-';
+                            final trays = (m['trays'] as num? ?? 0).toInt();
+                            final units = (m['units'] as num? ?? 0).toInt();
+
+                            return Container(
+                              padding: EdgeInsets.all(12 * s),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[900],
+                                borderRadius: BorderRadius.circular(12 * s),
+                                border: Border.all(color: gold, width: 1),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      name,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: gold,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14 * s,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                SizedBox(width: 8 * s),
-                                Flexible(
-                                  child: Wrap(
-                                    alignment: WrapAlignment.end,
-                                    crossAxisAlignment: WrapCrossAlignment.center,
-                                    spacing: 8 * s,
-                                    runSpacing: 6 * s,
-                                    children: [
-                                      _pill(context, 'Tava', trays.toString()),
-                                      _pill(context, 'Adet', units.toString()),
-                                    ],
+                                  SizedBox(width: 8 * s),
+                                  Flexible(
+                                    child: Wrap(
+                                      alignment: WrapAlignment.end,
+                                      crossAxisAlignment: WrapCrossAlignment.center,
+                                      spacing: 8 * s,
+                                      runSpacing: 6 * s,
+                                      children: [
+                                        _pill(context, 'Tava', trays.toString()),
+                                        _pill(context, 'Adet', units.toString()),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
+                                ],
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                  ],
-                );
-              },
+                    ],
+                  );
+                },
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -300,26 +339,31 @@ class _AdminSummaryBanner extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// GENEL YARDIMCI
-// productName’e göre `units` azaltır; istersen `day` vererek o günün kaydını
-// azaltırsın. Transaction kullanır, negatife düşürmez.
+// GENEL YARDIMCI (GÜNCEL)
+// productName’e göre GÜNLÜK kayıtta `units` azaltır.
+// `day` verilmezse bugünün tarihi kullanılır. (production_daily)
+// Transaction kullanır, negatife düşürmez.
 // ---------------------------------------------------------------------------
 Future<void> decrementProductionUnitsByName({
   required String productName,
   required int minusUnits,
-  String? day, // opsiyonel: gün filtresi
+  String? day, // opsiyonel: verilmezse bugün kullanılır
 }) async {
   if (minusUnits <= 0) return;
 
   final db = FirebaseFirestore.instance;
-  final col = db.collection('production');
+  final col = db.collection('production_daily');
+  final String finalDay = (day != null && day.isNotEmpty) ? day : _todayKey();
 
-  Query<Map<String, dynamic>> q = col.where('productName', isEqualTo: productName);
-  if (day != null && day.isNotEmpty) {
-    q = q.where('date', isEqualTo: day);
-  }
+  // Aynı gün + ürün adına göre bir kaydı hedefle
+  Query<Map<String, dynamic>> q = col
+      .where('productName', isEqualTo: productName)
+      .where('date', isEqualTo: finalDay);
+
   final snap = await q.limit(1).get();
-  final ref = snap.docs.isNotEmpty ? snap.docs.first.reference : col.doc();
+  final ref = snap.docs.isNotEmpty
+      ? snap.docs.first.reference
+      : col.doc("${finalDay}__${productName.hashCode}");
 
   await db.runTransaction((tx) async {
     final cur = await tx.get(ref);
@@ -327,17 +371,17 @@ Future<void> decrementProductionUnitsByName({
     final curTrays = (cur.data()?['trays'] as num?)?.toInt() ?? 0;
     final newUnits = max(0, curUnits - minusUnits);
 
-    final data = <String, dynamic>{
-      'productName': productName,
-      'units': newUnits,
-      'trays': curTrays,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-    if (day != null && day.isNotEmpty) {
-      data['date'] = day;
-    }
-
-    tx.set(ref, data, SetOptions(merge: true));
+    tx.set(
+      ref,
+      {
+        'date': finalDay,
+        'productName': productName,
+        'units': newUnits,
+        'trays': curTrays,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
   });
 }
 
@@ -351,4 +395,33 @@ double _scaleFor(BuildContext context) {
   if (s < 0.85) s = 0.85;
   if (s > 1.35) s = 1.35;
   return s;
+}
+
+// -------------------------
+// Bugünün YYYY-MM-DD formatı
+// -------------------------
+String _todayKey() {
+  final now = DateTime.now();
+  return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+}
+
+// -------------------------
+// Tarih format kontrol ("YYYY-MM-DD")
+// -------------------------
+bool _isValidDateKey(String v) {
+  final re = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+  if (!re.hasMatch(v)) return false;
+  try {
+    final y = int.parse(v.substring(0, 4));
+    final m = int.parse(v.substring(5, 7));
+    final d = int.parse(v.substring(8, 10));
+    final dt = DateTime(y, m, d);
+    // normalize edip tekrar formatlayalım
+    final back = "${dt.year.toString().padLeft(4, '0')}-"
+        "${dt.month.toString().padLeft(2, '0')}-"
+        "${dt.day.toString().padLeft(2, '0')}";
+    return back == v;
+  } catch (_) {
+    return false;
+  }
 }

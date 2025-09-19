@@ -445,6 +445,46 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
         }
       }
 
+      // 1.5) Overview için kredi bakiyesi ve hareketleri güncelle (charge:+total, payment:-cash)
+      final creditsRef = db.collection('customer_credits').doc(targetUid);
+      await db.runTransaction((tx) async {
+        final snap = await tx.get(creditsRef);
+        final current = (snap.data()?['balance'] as num?)?.toDouble() ?? 0;
+        final newBal = (current + (split.total - split.cash)).toDouble(); // = current + credit
+
+        tx.set(
+          creditsRef,
+          {
+            'userId': targetUid,
+            // İsim overview’da da görünürse faydalı; elimizde varsa kullanalım
+            'customerName': (names.isEmpty ? targetUid : names.values.first),
+            'balance': newBal,
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+
+        final adjCol = creditsRef.collection('adjustments');
+        // charge: +total (teslim edilen malın borca yazılması)
+        tx.set(adjCol.doc(), {
+          'amount': split.total,
+          'type': 'charge',
+          'createdAt': FieldValue.serverTimestamp(),
+          'date': _dayKey,
+          'paymentId': payId,
+        });
+        // payment: -cash (ödenen nakit)
+        if (split.cash > 0) {
+          tx.set(adjCol.doc(), {
+            'amount': -split.cash,
+            'type': 'payment',
+            'createdAt': FieldValue.serverTimestamp(),
+            'date': _dayKey,
+            'paymentId': payId,
+          });
+        }
+      });
+
       // 2) Ödeme başarılı → ÜRETİM stoklarını düş (sadece pozitif adetler)
       final decFutures = <Future>[];
       payMap.forEach((pid, addQty) {
@@ -651,7 +691,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
                           // 🔴 ÖNEMLİ: Rozet artık desiredTotal gösterir → 0'a düşmez
                           leading: CircleAvatar(
                             backgroundColor: Colors.black,
-                            foregroundColor: gold,
+                            foregroundColor: const Color(0xFFFFD700),
                             radius: 14,
                             child: Text(
                               desiredTotal.toString(),
@@ -662,7 +702,7 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
                             pid,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: gold, fontWeight: FontWeight.w600, fontSize: 14),
+                            style: const TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.w600, fontSize: 14),
                           ),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -688,12 +728,12 @@ class _StockFromCustomerOrdersPageState extends State<StockFromCustomerOrdersPag
                                 onPressed: desiredTotal > 0
                                     ? () => setState(() => _target[pid] = max(0, desiredTotal - 1))
                                     : null,
-                                icon: const Icon(Icons.remove_circle_outline, color: gold),
+                                icon: const Icon(Icons.remove_circle_outline, color: Color(0xFFFFD700)),
                               ),
                               IconButton(
                                 tooltip: 'Hedef Toplamı Arttır',
                                 onPressed: () => setState(() => _target[pid] = desiredTotal + 1),
-                                icon: const Icon(Icons.add_circle_outline, color: gold),
+                                icon: const Icon(Icons.add_circle_outline, color: Color(0xFFFFD700)),
                               ),
                             ],
                           ),

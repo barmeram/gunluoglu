@@ -1,9 +1,14 @@
+// ========================
+// FILE: pos_sales_page.dart
+// ========================
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // ✅ seçilen gün için
 import 'package:gunluogluproje/sales_history_page.dart';
 import 'package:gunluogluproje/users_page.dart';
-// Stok azaltma helper
+
+// Stok azaltma helper (decrementProductionUnitsByName burada)
 import 'package:gunluogluproje/baker_stock_page.dart';
 import 'package:gunluogluproje/product_manage_page.dart';
 
@@ -23,6 +28,9 @@ class PosSalesPage extends StatefulWidget {
 
 class _PosSalesPageState extends State<PosSalesPage> {
   final db = FirebaseFirestore.instance;
+
+  // Seçilen gün key'i (AdminDailyPicker ile ortak)
+  static const _prefsKeySelectedDay = 'admin_daily_picker_selected_day';
 
   // Sepet (pid -> data)
   final Map<String, Map<String, dynamic>> cart = {};
@@ -44,6 +52,20 @@ class _PosSalesPageState extends State<PosSalesPage> {
   String _todayKey() {
     final now = DateTime.now();
     return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+  }
+
+  /// BakerStockPage’de seçilmiş gün varsa onu kullan; yoksa bugün.
+  Future<String> _resolveStockDay() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(_prefsKeySelectedDay);
+      if (saved != null && saved.trim().isNotEmpty) {
+        return saved;
+      }
+    } catch (_) {
+      // yoksay
+    }
+    return _todayKey();
   }
 
   // ------------------------- HESAPLAR -------------------------
@@ -305,7 +327,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
     );
   }
 
-  // POS adını üretime dönüştür
+  // POS adını üretime dönüştür (production_daily.productName ile eşleşmeli)
   String _mapToProductionName(String posName) {
     const aliases = <String, String>{
       'Kaşarlı': 'Kaşarlı Börek',
@@ -331,6 +353,7 @@ class _PosSalesPageState extends State<PosSalesPage> {
     setState(() => _saving = true);
 
     try {
+      // 1) Siparişi kaydet
       final orderRef = db.collection('orders').doc();
       await orderRef.set({
         'userId': widget.userId,
@@ -354,29 +377,40 @@ class _PosSalesPageState extends State<PosSalesPage> {
       });
       await itemsBatch.commit();
 
+      // 2) Hasılatı güncelle
       await _incrementRevenueSafely(total);
 
-      // Satış sonrası stok düş (adetli)
+      // 3) Seçilen günün stokunu düş
+      final targetDay = await _resolveStockDay(); // ✅ BakerStock’taki gün
       final futures = <Future>[];
       cart.forEach((pid, v) {
-        if (v['isWeighted'] == true) return;
+        if (v['isWeighted'] == true) return; // kg ile satılanlar stok düşmüyor
         final posName = (v['name'] as String?) ?? pid;
         final productionName = _mapToProductionName(posName);
         final qty = (v['qty'] as num?)?.toInt() ?? 0;
         if (qty > 0) {
-          futures.add(decrementProductionUnitsByName(productName: productionName, minusUnits: qty));
+          futures.add(
+            decrementProductionUnitsByName(
+              productName: productionName,
+              minusUnits: qty,
+              day: targetDay, // ✅ kritik: seçili gün
+            ),
+          );
         }
       });
       try {
         await Future.wait(futures);
       } on FirebaseException catch (e) {
         if (e.code == 'permission-denied' && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stok düşümü reddedildi (permission-denied).')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Stok düşümü reddedildi (permission-denied).')),
+          );
         } else {
           rethrow;
         }
       }
 
+      // 4) Sepeti temizle
       setState(() {
         cart.clear();
         _cartOrder.clear();
@@ -384,7 +418,9 @@ class _PosSalesPageState extends State<PosSalesPage> {
 
       final extra = paymentType == 'Nakit' ? ' • Para Üstü: ₺${(change ?? 0).toStringAsFixed(2)}' : '';
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Onaylandı ✅ $paymentType • ₺${total.toStringAsFixed(2)}$extra')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Onaylandı ✅ $paymentType • ₺${total.toStringAsFixed(2)} • Gün: $targetDay$extra')),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -599,7 +635,6 @@ class _PosSalesPageState extends State<PosSalesPage> {
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                  // Ürün kartlarında "Sepette" yazısı gösterilmiyor
                                 ],
                               ),
                             ),

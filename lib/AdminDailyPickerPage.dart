@@ -108,7 +108,6 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
         ),
       ),
     );
-
   }
 
   @override
@@ -129,8 +128,9 @@ class _AdminDailyPickerPageState extends State<AdminDailyPickerPage> {
       );
     }).toList();
 
+    // 🔑 GÜNLÜK veriler production_daily'de
     final dayStream = db
-        .collection('production')
+        .collection('production_daily')
         .where('date', isEqualTo: _selectedDay)
         .snapshots();
 
